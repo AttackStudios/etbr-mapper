@@ -39,13 +39,13 @@ export const LOGIC_TYPES = [
 ];
 
 export const CATEGORIES = [
-  { key: 'kits', name: 'Level Kits', icon: '🧱', hint: 'Pieces grouped by the level that uses them' },
-  { key: 'entities', name: 'Entities', icon: '👁', hint: 'Monsters — spawned by the host in co-op' },
-  { key: 'items', name: 'Items', icon: '🔦', hint: 'Pick-ups: almond water, flashlights…' },
-  { key: 'lights', name: 'Lights', icon: '💡', hint: 'Light sources' },
-  { key: 'gameplay', name: 'Gameplay', icon: '⚙️', hint: 'Doors, triggers, exits, gameplay blueprints' },
-  { key: 'packs', name: 'All Meshes', icon: '📦', hint: 'Every mesh in the game, by folder' },
-  { key: 'logic', name: 'Logic', icon: '🎯', hint: 'Spawn, exits, death zones, checkpoints' },
+  { key: 'kits', name: 'Level Kits', icon: 'kits', hint: 'Pieces grouped by the level that uses them' },
+  { key: 'entities', name: 'Entities', icon: 'entity', hint: 'Monsters — spawned by the host in co-op' },
+  { key: 'items', name: 'Items', icon: 'item', hint: 'Pick-ups: almond water, flashlights…' },
+  { key: 'lights', name: 'Lights', icon: 'light', hint: 'Light sources' },
+  { key: 'gameplay', name: 'Gameplay', icon: 'gameplay', hint: 'Doors, triggers, exits, gameplay blueprints' },
+  { key: 'packs', name: 'All Meshes', icon: 'meshes', hint: 'Every mesh in the game, by folder' },
+  { key: 'logic', name: 'Logic', icon: 'logic', hint: 'Spawn, exits, death zones, checkpoints' },
 ];
 
 export class Catalog {

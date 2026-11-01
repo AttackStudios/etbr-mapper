@@ -123,16 +123,38 @@ local function componentsOf(a, cls)
   return out
 end
 local LIGHT_CLASS
-local function makeLightsDynamic(a)
+state.fills = {}
+local function lightingMode() return ((state.map and state.map.settings) or {}).lighting or 'boosted' end
+local function makeLightsDynamic(a, id)
   if not LIGHT_CLASS or not LIGHT_CLASS:IsValid() then LIGHT_CLASS = StaticFindObject('/Script/Engine.LightComponent') end
   if not LIGHT_CLASS then return 0 end
+  local boosted = lightingMode() == 'boosted'
+  local boost = tonumber(((state.map or {}).settings or {}).lightBoost) or cfg.lightBoost
   local n = 0
   pcall(function()
     -- this UE4SS build returns a plain Lua table here (not a TArray with :ForEach)
     for _, c in ipairs(componentsOf(a, LIGHT_CLASS)) do
       pcall(function() c:SetMobility(2); n = n + 1 end)
+      if boosted then
+        pcall(function() c:SetIntensity((c.Intensity or 100) * boost) end)
+        pcall(function() c:SetAttenuationRadius((c.AttenuationRadius or 1000) * 1.6) end)
+      end
     end
   end)
+  -- Boosted: one soft, shadowless warm fill light per lamp stands in for the bounce light Unreal can't bake at runtime
+  if boosted and n > 0 and id then
+    pcall(function()
+      local p = a:K2_GetActorLocation()
+      local f = spawn(findObj(classCache, '/Script/Engine.PointLight'), vec(p.X, p.Y, p.Z - 160))
+      if f then
+        local lc = f.LightComponent
+        lc:SetMobility(2); lc:SetCastShadows(false)
+        lc:SetIntensity(cfg.fillIntensity); lc:SetAttenuationRadius(cfg.fillRadius)
+        lc:SetLightColor({ R = 1, G = 0.93, B = 0.72, A = 1 }, true)
+        state.fills[id] = f
+      end
+    end)
+  end
   return n
 end
 
@@ -176,11 +198,13 @@ local function spawnObject(o)
     if not isHost() and a.bReplicates then a:K2_DestroyActor(); return nil, 'host-only' end
   end
   place(a, o); applyProps(a, o)
-  if o.kind ~= 'mesh' then makeLightsDynamic(a) end
+  if o.kind ~= 'mesh' then makeLightsDynamic(a, o.id) end
   return a
 end
 
 local function destroyId(id)
+  local f = state.fills and state.fills[id]
+  if f then pcall(function() if f:IsValid() then f:K2_DestroyActor() end end); state.fills[id] = nil end
   local a = state.byId[id]
   if a then pcall(function() if a:IsValid() then a:K2_DestroyActor() end end) end
   state.byId[id] = nil
@@ -227,7 +251,7 @@ local function forgetWorld(reason)
   for k in pairs(classCache) do classCache[k] = nil end
   for k in pairs(assetCache) do assetCache[k] = nil end
   GS, KSL = nil, nil
-  state.byId, state.spawnedEntities, state.spawners = {}, {}, {}
+  state.byId, state.spawnedEntities, state.spawners, state.fills = {}, {}, {}, {}
   state.triggered, state.checkpoints, state.loading = {}, {}, false
   popups = {}
   state.worldId = nil
@@ -489,7 +513,7 @@ local function applyOps(ops)
     elseif op.o == 'cfg' then
       local k = op.k == 'meta' and 'meta' or 'settings'
       m[k] = m[k] or {}; merge(m[k], op.patch or {})
-      if op.patch and op.patch.offset then state.live.rev = -1 end -- moved the whole level: full rebuild
+      if op.patch and (op.patch.offset or op.patch.lighting or op.patch.lightBoost) then state.live.rev = -1 end -- full rebuild
     elseif op.o == 'replace' then
       state.live.rev = -1
     end

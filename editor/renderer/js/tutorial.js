@@ -31,7 +31,7 @@ export class Tutorial {
     const el = document.querySelector(s.sel); if (!el) { this.i++; return this.show(); }
     const r = el.getBoundingClientRect(), pad = 6;
     Object.assign(this.ring.style, { left: r.left - pad + 'px', top: r.top - pad + 'px', width: r.width + pad * 2 + 'px', height: r.height + pad * 2 + 'px' });
-    this.card.innerHTML = `<h3>${s.title}</h3><p>${s.text}</p><div class="row"><button class="ghost small" data-k="skip">Skip tutorial</button><span class="muted small">${this.i + 1} / ${STEPS.length}</span><button class="primary" data-k="next">${this.i === STEPS.length - 1 ? 'Let\'s build!' : 'Next →'}</button></div>`;
+    this.card.innerHTML = `<h3>${s.title}</h3><p>${s.text}</p><div class="row"><button class="ghost small" data-k="skip">Skip tutorial</button><span class="muted small">${this.i + 1} / ${STEPS.length}</span><button class="primary" data-k="next">${this.i === STEPS.length - 1 ? 'Start building' : 'Next'}</button></div>`;
     this.card.querySelector('[data-k=skip]').onclick = () => this.finish();
     this.card.querySelector('[data-k=next]').onclick = () => { this.i++; this.show(); };
     const cw = 330, ch = this.card.offsetHeight || 170;

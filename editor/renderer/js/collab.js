@@ -51,7 +51,7 @@ export class Collab extends EventTarget {
     this.doc.sendHook = (ops) => this._send({ t: 'op', ops });
     this.app.settings.lastRoom = msg.room; window.etbr.settings.set({ lastRoom: msg.room });
     this.dispatchEvent(new Event('change'));
-    this.app.toast(`🟢 Live in room ${msg.room}`);
+    this.app.toast(`Live in room ${msg.room}`);
   }
   async _reconnect() {
     this.dispatchEvent(new Event('change'));
@@ -91,8 +91,8 @@ export class Collab extends EventTarget {
   _msg(msg) {
     switch (msg.t) {
       case 'op': this.doc.apply(msg.ops, { record: false, source: 'remote' }); break;
-      case 'reject': this.app.toast('⚠️ ' + msg.reason); this._resync(); break;
-      case 'user+': this.users.set(msg.user.id, msg.user); this.app.toast(`👋 ${msg.user.name} joined`); this.dispatchEvent(new Event('change')); break;
+      case 'reject': this.app.toast(msg.reason); this._resync(); break;
+      case 'user+': this.users.set(msg.user.id, msg.user); this.app.toast(`${msg.user.name} joined`); this.dispatchEvent(new Event('change')); break;
       case 'user-': { const u = this.users.get(msg.id); this.users.delete(msg.id); this.vp.removeRemote(msg.id); if (u) this.app.toast(`${u.name} left`); this.dispatchEvent(new Event('change')); break; }
       case 'cursor': { const u = this.users.get(msg.id); if (u) this.vp.setRemoteCursor(msg.id, u, msg.p); break; }
       case 'select': { const u = this.users.get(msg.id); if (u) { u.sel = msg.ids; this.vp.setRemoteSelection(msg.id, u, msg.ids); } break; }
@@ -108,7 +108,7 @@ export class Collab extends EventTarget {
       case 'test': {
         const u = this.users.get(msg.id) || msg.user;
         if (msg.user) { msg.on ? this.gamePlayers.set(msg.id, msg.user) : this.gamePlayers.delete(msg.id); }
-        if (u) { this.vp.setRemoteTesting(msg.id, u, msg.on); this.app.toast(msg.on ? `🎮 ${u.name} is testing in the game` : `${u.name} left the game test`); this.dispatchEvent(new Event('change')); }
+        if (u) { this.vp.setRemoteTesting(msg.id, u, msg.on); this.app.toast(msg.on ? `${u.name} is testing in the game` : `${u.name} left the game test`); this.dispatchEvent(new Event('change')); }
         break;
       }
     }

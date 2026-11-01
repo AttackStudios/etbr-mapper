@@ -14,7 +14,7 @@ export function wandererAvatar(name, color) {
   const beam = new THREE.Mesh(new THREE.ConeGeometry(0.9, 4, 16, 1, true), new THREE.MeshBasicMaterial({ color: '#fff4c0', transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide }));
   beam.rotation.x = Math.PI / 2; beam.position.set(0, 1.45, -2.2); beam.visible = false; body.add(beam);
   const c = document.createElement('canvas'); c.width = 256; c.height = 64; const x = c.getContext('2d');
-  x.fillStyle = color; x.beginPath(); x.roundRect(0, 8, 256, 48, 24); x.fill(); x.fillStyle = '#111'; x.font = '700 28px Segoe UI, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText('🎮 ' + name.slice(0, 12), 128, 33);
+  x.fillStyle = color; x.beginPath(); x.roundRect(0, 8, 256, 48, 24); x.fill(); x.fillStyle = '#111'; x.font = '700 28px Segoe UI, sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(name.slice(0, 14), 128, 33);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false })); tag.scale.set(1.2, 0.3, 1); tag.position.y = 2.05; tag.renderOrder = 22; tag.userData.isLabel = true; g.add(tag);
   g.userData = { body, beam, target: new THREE.Vector3(), yaw: 0, t: 0 };

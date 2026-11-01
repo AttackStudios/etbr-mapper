@@ -5,6 +5,7 @@ import { Catalog, Thumbnailer, CATEGORIES, LEVEL_NAMES, LOGIC_TYPES } from './ca
 import { Viewport } from './viewport.js';
 import { Collab } from './collab.js';
 import { Tutorial } from './tutorial.js';
+import { icon, hydrateIcons, logoMark } from './icons.js';
 
 const api = window.etbr;
 const $ = (s, r = document) => r.querySelector(s);
@@ -38,6 +39,8 @@ class App {
 
   // ================================================================ boot
   async boot() {
+    hydrateIcons();
+    document.querySelectorAll('.logo-mark').forEach((m) => m.replaceWith(logoMark(m.closest('.small') ? 18 : 30)));
     this.settings = await api.settings.get();
     $('#st-name').value = this.settings.name || '';
     $('#st-color').value = this.settings.color || '#f2d45c';
@@ -74,10 +77,10 @@ class App {
     $('#boot-library').hidden = true; $('#boot-start').hidden = false;
     const rec = $('#recent'); rec.innerHTML = '';
     if (this.settings.recent?.length) rec.append(h('div', { class: 'muted small' }, 'Recent'));
-    for (const p of this.settings.recent || []) rec.append(h('button', { onclick: () => this.startWith(() => this.openPath(p)) }, '📄 ' + p.split(/[\\/]/).pop() + '  ', h('span', { class: 'muted small' }, p)));
+    for (const p of this.settings.recent || []) rec.append(h('button', { onclick: () => this.startWith(() => this.openPath(p)) }, icon('file'), ' ' + p.split(/[\\/]/).pop() + '  ', h('span', { class: 'muted small' }, p)));
     const auto = localStorage.getItem('etbr.autosave');
-    if (auto) rec.prepend(h('button', { onclick: () => this.startWith(() => this.loadText(auto, null)) }, '♻️ Recover last unsaved session'));
-    if (this.settings.lastRoom) rec.append(h('button', { onclick: () => this.startWith(() => this.joinRoom(this.settings.lastRoom)) }, `🤝 Rejoin room ${this.settings.lastRoom}`));
+    if (auto) rec.prepend(h('button', { onclick: () => this.startWith(() => this.loadText(auto, null)) }, icon('recover'), ' Recover last unsaved session'));
+    if (this.settings.lastRoom) rec.append(h('button', { onclick: () => this.startWith(() => this.joinRoom(this.settings.lastRoom)) }, icon('people'), ` Rejoin room ${this.settings.lastRoom}`));
     $('#st-new').onclick = () => this.startWith(() => this.newLevel(true));
     $('#st-open').onclick = () => this.startWith(() => this.open(), true);
     $('#st-join').onclick = () => this.startWith(() => this.joinDialog(), true);
@@ -105,7 +108,7 @@ class App {
     this.viewport.addEventListener('selection', () => { this.renderInspector(); this.renderOutlinerSel(); this.collab.sendSelection([...this.viewport.selection].filter((id) => id !== '__spawn')); this.status(); });
     this.viewport.addEventListener('scenechange', () => { this.status(); this.renderInspectorSoon(); this.renderOutlinerSoon(); this.applyLayerVisibility(); });
     this.viewport.addEventListener('dragmove', () => this.renderInspectorSoon());
-    this.viewport.addEventListener('cursor', (e) => { const p = e.detail; $('#st-cursor').textContent = `⌖ ${r1(p.x, 10)}, ${r1(p.z, 10)}, ${r1(p.y, 10)} m`; });
+    this.viewport.addEventListener('cursor', (e) => { const p = e.detail; $('#st-cursor').textContent = `${r1(p.x, 10)}, ${r1(p.z, 10)}, ${r1(p.y, 10)} m`; });
     this.collab.addEventListener('change', () => { this.renderPeople(); this.status(); });
     this.collab.addEventListener('chat', (e) => this.addChat(e.detail));
     this.doc.on((ops, src) => { if (ops.some((o) => o.o === 'replace' || o.o === 'cfg')) { this.renderLevel(); $('#level-name').value = this.doc.map.meta.name || ''; } });
@@ -178,7 +181,7 @@ class App {
     const p = await api.file.save({ path: this.filePath, text: this.doc.serialize(), name: this.doc.map.meta.name, saveAs });
     if (!p) return null;
     this.filePath = p; this.doc.dirty = false; localStorage.removeItem('etbr.autosave');
-    this.toast('💾 Saved ' + p.split(/[\\/]/).pop());
+    this.toast('Saved ' + p.split(/[\\/]/).pop());
     return p;
   }
   async confirmClose() {
@@ -195,7 +198,7 @@ class App {
       case 'export': return this.save(true);
       case 'undo': if (!this.doc.undo()) this.toast('Nothing to undo'); return;
       case 'redo': if (!this.doc.redo()) this.toast('Nothing to redo'); return;
-      case 'lighting': { const m = vp.lighting === 'bright' ? 'game' : 'bright'; vp.setLighting(m); $('#btn-lighting').textContent = m === 'bright' ? '☀ Bright' : '🌙 Game-like'; return; }
+      case 'lighting': { const m = vp.lighting === 'bright' ? 'game' : 'bright'; vp.setLighting(m); const b = $('#btn-lighting'); b.replaceChildren(icon(m === 'bright' ? 'sun' : 'moon'), h('span', { class: 'lbl' }, m === 'bright' ? ' Bright' : ' Game-like')); return; }
       case 'collab': return this.tab('people');
       case 'play': return this.playInGame();
       case 'help': return this.help();
@@ -301,7 +304,7 @@ class App {
   // ================================================================ palette
   renderCats() {
     const nav = $('#pal-cats'); nav.innerHTML = '';
-    for (const c of CATEGORIES) nav.append(h('button', { class: this.cat === c.key ? 'on' : '', title: c.hint, onclick: () => { this.cat = c.key; this.group = null; this.q = ''; $('#pal-q').value = ''; this.renderCats(); this.renderPalette(); } }, h('span', {}, c.icon), c.name));
+    for (const c of CATEGORIES) nav.append(h('button', { class: this.cat === c.key ? 'on' : '', title: c.hint, onclick: () => { this.cat = c.key; this.group = null; this.q = ''; $('#pal-q').value = ''; this.renderCats(); this.renderPalette(); } }, icon(c.icon, 20), c.name));
   }
   renderPalette() {
     const grid = $('#pal-grid'), groups = $('#pal-groups');
@@ -371,14 +374,14 @@ class App {
       return h('div', { class: 'field' }, h('span', {}, label), h('div', { class: 'row', style: 'flex-wrap:nowrap' },
         h('span', { class: 'tag-chip', style: 'flex:1;overflow:hidden;text-overflow:ellipsis', title: k[key] || '' }, it ? it.name : '— none —'),
         h('button', { class: 'small', title: 'Use the object last clicked in the library', onclick: () => { if (!this.lastPicked || this.lastPicked.kind !== 'mesh') return this.toast('Click a mesh in the library first'); k[key] = this.lastPicked.id; if (key === 'wall' && this.lastPicked.bounds) k.height = Math.round(this.lastPicked.bounds.e[2] * 2); this.setMode('room'); } }, 'Use picked'),
-        h('button', { class: 'small ghost', title: 'None', onclick: () => { k[key] = null; this.renderRoomPanel(); } }, '✕')));
+        h('button', { class: 'small ghost', title: 'None', onclick: () => { k[key] = null; this.renderRoomPanel(); } }, icon('close', 12))));
     };
-    p.append(h('h4', {}, '▣ Room builder'), h('p', { class: 'muted small', style: 'margin:0 0 10px' }, 'Drag a rectangle on the floor to build a whole room. PageUp/PageDown changes floor (storey).'),
+    p.append(h('h4', {}, icon('room'), ' Room builder'), h('p', { class: 'muted small', style: 'margin:0 0 10px' }, 'Drag a rectangle on the floor to build a whole room. PageUp/PageDown changes floor (storey).'),
       slot('floor', 'Floor'), slot('wall', 'Walls'), slot('ceiling', 'Ceiling'), slot('light', 'Lamp'),
       h('div', { class: 'field' }, h('span', {}, 'Height'), h('input', { type: 'number', value: k.height / 100, step: 0.25, onchange: (e) => (k.height = Math.max(50, +e.target.value * 100)) })),
       h('div', { class: 'field' }, h('span', {}, 'Tile'), h('input', { type: 'number', value: k.cell / 100, step: 0.5, onchange: (e) => (k.cell = Math.max(50, +e.target.value * 100)) })),
       h('div', { class: 'field' }, h('span', {}, 'Lights'), h('label', { class: 'row', style: 'align-items:center' }, h('input', { type: 'checkbox', checked: k.pointLight, onchange: (e) => (k.pointLight = e.target.checked) }), ' real light every', h('input', { type: 'number', value: k.lightEvery, min: 1, style: 'width:50px', onchange: (e) => (k.lightEvery = Math.max(1, +e.target.value)) }), 'tiles')),
-      h('button', { class: 'small ghost', onclick: () => { this.defaultKit(); this.renderRoomPanel(); } }, '↺ Level 0 kit'));
+      h('button', { class: 'small ghost', onclick: () => { this.defaultKit(); this.renderRoomPanel(); } }, icon('reset', 13), ' Level 0 kit'));
   }
 
   // ================================================================ inspector
@@ -389,14 +392,14 @@ class App {
     el.innerHTML = '';
     const ids = [...this.viewport.selection];
     if (!ids.length) {
-      el.append(h('div', { class: 'empty' }, h('span', { class: 'big' }, '🖱️'), 'Click something in the world to edit it.', h('br'), h('br'),
+      el.append(h('div', { class: 'empty' }, h('span', { class: 'big' }, icon('cursor', 34)), 'Click something in the world to edit it.', h('br'), h('br'),
         h('span', { class: 'small' }, 'Or pick an object from the library on the left and click to place it.')));
       return;
     }
     if (ids.length === 1 && ids[0] === '__spawn') return this.inspectSpawn(el);
     const sel = this.selectedItems();
     if (sel.length > 1) {
-      el.append(h('div', { class: 'insp-title' }, h('div', { class: 'ico' }, '🧩'), h('div', {}, h('b', {}, `${sel.length} things selected`), h('small', {}, 'Drag the gizmo to move them together'))),
+      el.append(h('div', { class: 'insp-title' }, h('div', { class: 'ico' }, icon('stack', 24)), h('div', {}, h('b', {}, `${sel.length} things selected`), h('small', {}, 'Drag the gizmo to move them together'))),
         this.actionsRow(),
         h('div', { class: 'sec' }, h('h4', {}, 'Layer'), this.layerSelect((v) => this.doc.apply(sel.filter((s) => s.c === 'objects').map(({ it }) => ({ o: 'set', c: 'objects', id: it.id, patch: { layer: v } })), { label: 'Set layer' }))));
       return;
@@ -409,7 +412,7 @@ class App {
     if (item) this.thumbs.request(item, img);
     el.append(h('div', { class: 'insp-title' }, img, h('div', {}, h('b', {}, item?.name || 'Missing asset'), h('small', {}, it.asset || it.kind))));
     if (item?.levels?.length) el.append(h('div', {}, ...item.levels.map((l) => h('span', { class: 'tag-chip' }, LEVEL_NAMES[l] || l))));
-    if (item?.cat === 'entities') el.append(h('p', { class: 'small muted' }, '👁 Entity — the host spawns it in co-op. Its AI may need nav-mesh to chase properly.'));
+    if (item?.cat === 'entities') el.append(h('p', { class: 'small muted' }, 'Entity: the host spawns it in co-op, and everyone sees it.'));
     const set = (patch, label) => this.doc.apply([{ o: 'set', c, id: it.id, patch }], { label });
     el.append(
       this.vecField('Position', it.pos.map((v) => v / 100), 'm', (v) => set({ pos: v.map((x) => Math.round(x * 100)) }, 'Move'), 0.1),
@@ -443,7 +446,7 @@ class App {
   inspectLogic(el, it) {
     const t = LOGIC_TYPES.find((x) => x.type === it.type) || { name: it.type, color: '#fff' };
     const set = (patch, label) => this.doc.apply([{ o: 'set', c: 'logic', id: it.id, patch }], { label });
-    el.append(h('div', { class: 'insp-title' }, h('div', { class: 'ico', style: `background:${t.color}33;color:${t.color}` }, '🎯'), h('div', {}, h('b', {}, t.name), h('small', {}, t.desc))));
+    el.append(h('div', { class: 'insp-title' }, h('div', { class: 'ico', style: `background:${t.color}33;color:${t.color}` }, icon(t.type === 'entityspawn' ? 'entity' : 'zone', 24)), h('div', {}, h('b', {}, t.name), h('small', {}, t.desc))));
     el.append(
       this.vecField('Position', it.pos.map((v) => v / 100), 'm', (v) => set({ pos: v.map((x) => Math.round(x * 100)) }, 'Move'), 0.1),
       this.vecField('Size', (it.size || [200, 200, 200]).map((v) => v / 100), 'm', (v) => set({ size: v.map((x) => Math.max(10, Math.round(x * 100))) }, 'Resize'), 0.5),
@@ -457,7 +460,7 @@ class App {
     if (it.type === 'entityspawn') this.inspectSpawnGroup(el, it, set);
     if (it.type === 'teleport') {
       el.append(this.vecField('Target', (it.to || it.pos).map((v) => v / 100), 'm', (v) => set({ to: v.map((x) => Math.round(x * 100)) }, 'Teleport target'), 0.5),
-        h('button', { class: 'small', onclick: () => { const p = this.viewport.cursorPoint; if (p) set({ to: [Math.round(p.x * 100), Math.round(p.z * 100), Math.round(p.y * 100) + 100] }, 'Teleport target'); } }, '⌖ Set target to last mouse point'));
+        h('button', { class: 'small', onclick: () => { const p = this.viewport.cursorPoint; if (p) set({ to: [Math.round(p.x * 100), Math.round(p.z * 100), Math.round(p.y * 100) + 100] }, 'Teleport target'); } }, icon('crosshair', 13), ' Set target to last mouse point'));
     }
     el.append(h('div', { class: 'sec' }, this.actionsRow()));
   }
@@ -485,7 +488,7 @@ class App {
     const ents = this.catalog.items.filter((i) => i.cat === 'entities').sort((a, b) => a.name.localeCompare(b.name));
     const esel = h('select', { onchange: (e) => setG({ entity: e.target.value }) });
     for (const e of ents) esel.append(h('option', { value: e.id, selected: e.id === G.entity }, e.name));
-    el.append(h('div', { class: 'sec' }, h('h4', {}, '👁 Spawn group'),
+    el.append(h('div', { class: 'sec' }, h('h4', {}, 'Spawn group'),
       h('div', { class: 'field' }, h('span', {}, 'Group'), gsel),
       h('p', { class: 'small muted', style: 'margin-top:-2px' }, `${areas} area${areas === 1 ? '' : 's'} in this group. Each spawn picks one of them at random, then a random spot inside it.`),
       h('div', { class: 'field' }, h('span', {}, 'Entity'), esel),
@@ -499,16 +502,16 @@ class App {
   inspectSpawn(el) {
     const sp = this.doc.map.settings.spawn;
     const set = (patch) => this.doc.apply([{ o: 'cfg', k: 'settings', patch: { spawn: { ...sp, ...patch } } }], { label: 'Move spawn' });
-    el.append(h('div', { class: 'insp-title' }, h('div', { class: 'ico', style: 'color:#4fd1ff' }, '🧍'), h('div', {}, h('b', {}, 'Player Spawn'), h('small', {}, 'Everyone starts here. The arrow is the way they face.'))),
+    el.append(h('div', { class: 'insp-title' }, h('div', { class: 'ico', style: 'color:#4fd1ff' }, icon('spawn', 24)), h('div', {}, h('b', {}, 'Player Spawn'), h('small', {}, 'Everyone starts here. The arrow is the way they face.'))),
       this.vecField('Position', sp.pos.map((v) => v / 100), 'm', (v) => set({ pos: v.map((x) => Math.round(x * 100)) }), 0.1),
       this.numField('Facing (°)', sp.yaw || 0, (v) => set({ yaw: v }), 15));
   }
   actionsRow() {
     return h('div', { class: 'row' },
-      h('button', { onclick: () => this.duplicateSelected(), title: 'Ctrl+D' }, '⧉ Duplicate'),
-      h('button', { onclick: () => this.viewport.focusSelection(), title: 'F' }, '🎯 Focus'),
-      h('button', { onclick: () => this.dropToFloor(), title: 'End' }, '⤓ Drop to floor'),
-      h('button', { class: 'danger', onclick: () => this.deleteSelected(), title: 'Delete' }, '🗑 Delete'));
+      h('button', { onclick: () => this.duplicateSelected(), title: 'Ctrl+D' }, icon('duplicate', 14), ' Duplicate'),
+      h('button', { onclick: () => this.viewport.focusSelection(), title: 'F' }, icon('focus', 14), ' Focus'),
+      h('button', { onclick: () => this.dropToFloor(), title: 'End' }, icon('floor', 14), ' Drop to floor'),
+      h('button', { class: 'danger', onclick: () => this.deleteSelected(), title: 'Delete' }, icon('trash', 14), ' Delete'));
   }
   vecField(label, vals, unit, onchange, step, names) {
     const inputs = vals.map((v, i) => h('input', { type: 'number', step, value: r1(v), title: names ? names[i] : ['X (forward)', 'Y (right)', 'Z (up)'][i] }));
@@ -547,18 +550,18 @@ class App {
     for (const l of this.layers()) {
       const n = this.doc.map.objects.filter((o) => (o.layer || 'Default') === l).length;
       lay.append(h('div', { class: 'ol-item' + (l === this.activeLayer ? ' on' : ''), onclick: () => { this.activeLayer = l; this.renderOutliner(); } },
-        h('span', { title: 'Show/hide', onclick: (e) => { e.stopPropagation(); this.hiddenLayers.has(l) ? this.hiddenLayers.delete(l) : this.hiddenLayers.add(l); this.applyLayerVisibility(); this.renderOutliner(); } }, this.hiddenLayers.has(l) ? '🙈' : '👁'),
+        h('span', { title: 'Show/hide', onclick: (e) => { e.stopPropagation(); this.hiddenLayers.has(l) ? this.hiddenLayers.delete(l) : this.hiddenLayers.add(l); this.applyLayerVisibility(); this.renderOutliner(); } }, icon(this.hiddenLayers.has(l) ? 'eyeoff' : 'eye', 14)),
         l, h('span', { class: 'lk muted' }, `${n}${l === this.activeLayer ? ' · active' : ''}`)));
     }
     el.append(lay);
     const list = h('div', { class: 'sec' }, h('h4', {}, 'Objects'));
-    const rows = [{ id: '__spawn', name: '🧍 Player Spawn' }];
-    for (const l of this.doc.map.logic) rows.push({ id: l.id, name: '🎯 ' + (LOGIC_TYPES.find((t) => t.type === l.type)?.name || l.type) });
-    for (const o of this.doc.map.objects) rows.push({ id: o.id, name: (this.catalog.get(o.asset)?.name || (o.kind === 'text' ? 'Text: ' + (o.props?.text || '') : o.asset)), layer: o.layer });
+    const rows = [{ id: '__spawn', name: 'Player Spawn', ic: 'spawn' }];
+    for (const l of this.doc.map.logic) rows.push({ id: l.id, name: (LOGIC_TYPES.find((t) => t.type === l.type)?.name || l.type), ic: l.type === 'entityspawn' ? 'entity' : 'zone' });
+    for (const o of this.doc.map.objects) rows.push({ id: o.id, name: (this.catalog.get(o.asset)?.name || (o.kind === 'text' ? 'Text: ' + (o.props?.text || '') : o.asset)), layer: o.layer, ic: 'meshes' });
     const shown = rows.filter((r) => !f || r.name.toLowerCase().includes(f));
     for (const r of shown.slice(0, 600)) {
       const lk = this.viewport.locks.get(r.id);
-      list.append(h('div', { class: 'ol-item' + (this.viewport.selection.has(r.id) ? ' on' : ''), 'data-id': r.id, onclick: (e) => this.viewport.select([r.id], { add: e.shiftKey, toggle: e.ctrlKey }), ondblclick: () => this.viewport.focusSelection() }, r.name, lk ? h('span', { class: 'lk', style: `color:${lk.color}` }, '🔒 ' + lk.name) : null));
+      list.append(h('div', { class: 'ol-item' + (this.viewport.selection.has(r.id) ? ' on' : ''), 'data-id': r.id, onclick: (e) => this.viewport.select([r.id], { add: e.shiftKey, toggle: e.ctrlKey }), ondblclick: () => this.viewport.focusSelection() }, icon(r.ic || 'meshes', 13), r.name, lk ? h('span', { class: 'lk', style: `color:${lk.color}` }, icon('lock', 11), ' ' + lk.name) : null));
     }
     if (shown.length > 600) list.append(h('div', { class: 'muted small' }, `…and ${shown.length - 600} more (use the filter)`));
     el.append(list);
@@ -582,13 +585,21 @@ class App {
         this.numField('Build height (m)', (s.offset?.[2] ?? 200000) / 100, (v) => cfg({ offset: [s.offset?.[0] || 0, s.offset?.[1] || 0, Math.round(v * 100)] }), 100),
         h('p', { class: 'small muted', style: 'margin-top:-4px' }, 'Your level is built this high above whatever game level you load it from, so it never overlaps.'),
         this.numField('Fall death (m)', (s.killZ ?? -3000) / 100, (v) => cfg({ killZ: Math.round(v * 100) }), 5),
-        h('p', { class: 'small muted', style: 'margin-top:-4px' }, 'Falling this far below your level respawns the player.')),
+        h('p', { class: 'small muted', style: 'margin-top:-4px' }, 'Falling this far below your level respawns the player.'),
+        h('div', { class: 'field' }, h('span', {}, 'Lighting'), (() => {
+          const sel = h('select', { onchange: (e) => cfg({ lighting: e.target.value }) },
+            h('option', { value: 'boosted', selected: (s.lighting || 'boosted') === 'boosted' }, 'Boosted — looks like real Level 0'),
+            h('option', { value: 'realistic', selected: s.lighting === 'realistic' }, 'Realistic — exact game lamp values'));
+          return sel;
+        })()),
+        h('p', { class: 'small muted', style: 'margin-top:-4px' }, 'The real levels use baked bounce light, which can\'t be created while the game is running. Boosted brightens the lamps and adds soft fill light so rooms look close to the real thing; Realistic uses the game\'s exact lamp settings (darker).'),
+        (s.lighting || 'boosted') === 'boosted' ? this.numField('Lamp boost ×', s.lightBoost ?? 4, (v) => cfg({ lightBoost: Math.max(1, Math.min(20, v)) }), 0.5) : null),
       h('div', { class: 'sec' }, h('h4', {}, 'Stats'),
         h('div', { class: 'muted' }, `${m.objects.length.toLocaleString()} objects · ${m.logic.length} logic zones · ${m.objects.filter((o) => o.asset?.includes('Light')).length} lights`),
         h('div', { class: 'muted small' }, 'Builders: ' + ([m.meta.author, ...(m.meta.collaborators || [])].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ') || '—'))),
       h('div', { class: 'sec' }, h('h4', {}, 'Share'),
         h('p', { class: 'small muted' }, 'Get a code friends can type in-game (etbr fetch CODE) to download this level — no file sending needed.'),
-        h('button', { onclick: () => this.shareCode() }, '🔗 Get share code')),
+        h('button', { onclick: () => this.shareCode() }, icon('link', 14), ' Get share code')),
     );
   }
   async shareCode() {
@@ -605,19 +616,19 @@ class App {
     const el = $('#tab-people'); el.innerHTML = '';
     const c = this.collab;
     $('#btn-collab').classList.toggle('live', c.connected);
-    $('#btn-collab').textContent = c.connected ? `🟢 ${c.room}` : '🤝 Collab';
+    $('#btn-collab').replaceChildren(icon(c.connected ? 'live' : 'people'), c.connected ? ' ' + c.room : ' Collab');
     $('#people-count').textContent = c.connected ? `(${c.users.size})` : '';
     if (!c.connected) {
-      el.append(h('div', { class: 'empty' }, h('span', { class: 'big' }, '🤝'), h('b', {}, 'Build together, live'), h('p', { class: 'small' }, 'Start a session and send your friends the code. Everyone sees each other\'s cursors and changes instantly.')),
-        h('button', { class: 'primary', style: 'width:100%;margin-bottom:8px', onclick: () => this.hostRoom() }, '▶ Start a live session'),
-        h('button', { style: 'width:100%', onclick: () => this.joinDialog() }, '🔑 Join with a code'),
+      el.append(h('div', { class: 'empty' }, h('span', { class: 'big' }, icon('people', 34)), h('b', {}, 'Build together, live'), h('p', { class: 'small' }, 'Start a session and send your friends the code. Everyone sees each other\'s cursors and changes instantly.')),
+        h('button', { class: 'primary', style: 'width:100%;margin-bottom:8px', onclick: () => this.hostRoom() }, icon('play', 14), ' Start a live session'),
+        h('button', { style: 'width:100%', onclick: () => this.joinDialog() }, icon('key', 14), ' Join with a code'),
         h('p', { class: 'small muted', style: 'margin-top:14px' }, `You appear as `, h('b', { style: `color:${this.settings.color}` }, this.settings.name), '. Change it on the start screen.'));
       return;
     }
     el.append(h('div', { class: 'muted small' }, 'Room code — send this to friends'), h('div', { class: 'room-code', title: 'Click to copy', onclick: () => { navigator.clipboard.writeText(c.room); this.toast('Code copied'); } }, c.room));
     const ppl = h('div', { class: 'sec' }, h('h4', {}, `In this room (${c.users.size})`));
     for (const u of c.users.values()) ppl.append(h('div', { class: 'person' }, h('i', { class: 'dot', style: `background:${u.color}` }), u.name, u.id === c.you ? h('span', { class: 'muted small' }, ' (you)') : null));
-    for (const g of c.gamePlayers.values()) ppl.append(h('div', { class: 'person' }, h('i', { class: 'dot', style: `background:${g.color}` }), '🎮 ' + g.name, h('span', { class: 'muted small' }, ' in game')));
+    for (const g of c.gamePlayers.values()) ppl.append(h('div', { class: 'person' }, h('i', { class: 'dot', style: `background:${g.color}` }), icon('gamepad', 14), ' ' + g.name, h('span', { class: 'muted small' }, ' in game')));
     el.append(ppl);
     const chat = h('div', { class: 'chat', id: 'chat-log' });
     for (const m of this.chatLog || []) chat.append(this.chatRow(m));
@@ -629,10 +640,10 @@ class App {
   addChat(m) {
     (this.chatLog = this.chatLog || []).push(m); if (this.chatLog.length > 200) this.chatLog.shift();
     const log = $('#chat-log'); if (log) { log.append(this.chatRow(m)); log.scrollTop = 1e9; }
-    if ($('#tab-people').hidden) this.toast(`💬 ${m.name}: ${m.text}`);
+    if ($('#tab-people').hidden) this.toast(`${m.name}: ${m.text}`);
   }
   async hostRoom() {
-    try { const code = await this.collab.create(); this.tab('people'); this.modal('You\'re live! 🎉', `<p>Send friends this code. They open ETBR Mapper → <b>Join a friend</b>.</p><div class="room-code">${code}</div>`); }
+    try { const code = await this.collab.create(); this.tab('people'); this.modal('You\'re live', `<p>Send friends this code. They open ETBR Mapper and choose <b>Join a friend</b>.</p><div class="room-code">${code}</div>`); }
     catch (e) { this.modal('Could not start session', `<p>${esc(e.message)}</p>`); }
   }
   joinDialog() {
@@ -662,14 +673,14 @@ class App {
     const live = await api.game.writeLive({ room: this.collab.room, server: this.settings.serverUrl, name: this.settings.name, color: this.settings.color });
     if (!live.ok) return this.modal('Can\'t test yet', `<p>${esc(live.error)}</p>`);
     const { running } = await api.game.launch();
-    this.modal('🎮 Test in game', `
+    this.modal('Test in game', `
       <p>${running ? 'Escape the Backrooms is already running.' : 'Launching Escape the Backrooms through Steam…'}</p>
       <ol class="steps">
         <li>Start a game (any level — singleplayer or a co-op lobby you host).</li>
         <li>Press <span class="kbd">F7</span>. Your level builds and stays <b>live</b>: anything you or friends change here appears in the game within a second.</li>
-        <li>Press <span class="kbd">F6</span> to go to the spawn. You'll show up as a 🎮 avatar in everyone's editor.</li>
+        <li>Press <span class="kbd">F6</span> to go to the spawn. You'll show up as a walking avatar in everyone's editor.</li>
       </ol>
-      <p><b>Testing together:</b> friends join room <code>${esc(this.collab.room)}</code> in their editor, click <b>🎮 Test in game</b>, then join your Steam lobby and press <span class="kbd">F7</span>. The host's <span class="kbd">F6</span> brings everyone to the spawn.</p>
+      <p><b>Testing together:</b> friends join room <code>${esc(this.collab.room)}</code> in their editor, click <b>Test in game</b>, then join your Steam lobby and press <span class="kbd">F7</span>. The host's <span class="kbd">F6</span> brings everyone to the spawn.</p>
       <p class="small">F8 removes the level · <code>etbr tp</code> back to spawn · <code>etbr lowfx on</code> only if your PC lags.</p>`);
   }
 
@@ -686,7 +697,7 @@ class App {
     const vp = this.viewport;
     $('#st-objects').textContent = `${this.doc.map.objects.length.toLocaleString()} objects · ${this.doc.map.logic.length} zones${vp.workY ? ` · floor height ${vp.workY} m` : ''}`;
     $('#st-sel').textContent = vp.selection.size ? `${vp.selection.size} selected` : '';
-    $('#st-collab').textContent = this.collab?.connected ? `🟢 Live · ${this.collab.users.size} in room ${this.collab.room}` : '';
+    $('#st-collab').textContent = this.collab?.connected ? `Live · ${this.collab.users.size} in room ${this.collab.room}` : '';
   }
   toast(msg, ms = 2600) {
     const t = h('div', { class: 'toast' }, msg); $('#toasts').append(t);
@@ -729,7 +740,7 @@ class App {
         <span class="kbd">Delete</span><span>Delete selection</span>
         <span class="kbd">End</span><span>Drop selection to the floor</span>
         <span class="kbd">PageUp / PageDown</span><span>Build on the next / previous storey</span>
-        <span class="kbd">L</span><span>Bright ↔ game-like lighting preview</span>
+        <span class="kbd">L</span><span>Bright / game-like lighting preview</span>
         <span class="kbd">Ctrl+Z / Ctrl+Y</span><span>Undo · Redo</span>
         <span class="kbd">Ctrl+S / Ctrl+Shift+S</span><span>Save · Export .etbrmap</span>
       </div>`, [{ label: 'Replay tutorial', onclick: () => this.tutorial.start() }, { label: 'Close', class: 'primary' }]);

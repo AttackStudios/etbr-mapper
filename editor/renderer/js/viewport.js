@@ -196,7 +196,7 @@ export class Viewport extends EventTarget {
     for (const id of ids) {
       if (!this.objects.has(id)) continue;
       const lk = this.locks.get(id);
-      if (lk) { this.app.toast(`🔒 ${lk.name} is editing that`); continue; }
+      if (lk) { this.app.toast(`${lk.name} is editing that`); continue; }
       if (toggle && this.selection.has(id)) this.selection.delete(id); else this.selection.add(id);
     }
     this._refreshSelectionBoxes(); this._refreshGizmo();

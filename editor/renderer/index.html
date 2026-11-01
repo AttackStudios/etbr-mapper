@@ -13,7 +13,7 @@
   <!-- ============ boot / start ============ -->
   <section id="boot" class="screen">
     <div class="boot-card">
-      <div class="logo"><span class="logo-mark">▚</span> ETBR <b>Mapper</b></div>
+      <div class="logo"><span class="logo-mark"></span> ETBR <b>Mapper</b></div>
       <p class="tag">Build your own Escape the Backrooms levels — together.</p>
 
       <div id="boot-library" hidden>
@@ -29,9 +29,9 @@
 
       <div id="boot-start" hidden>
         <div class="start-grid">
-          <button class="start-tile" id="st-new"><span>✨</span><b>New level</b><small>Start from an empty void</small></button>
-          <button class="start-tile" id="st-open"><span>📂</span><b>Open .etbrmap</b><small>Continue a saved level</small></button>
-          <button class="start-tile" id="st-join"><span>🤝</span><b>Join a friend</b><small>Enter their 6-letter room code</small></button>
+          <button class="start-tile" id="st-new"><i data-icon="new" data-size="28"></i><b>New level</b><small>Start from an empty void</small></button>
+          <button class="start-tile" id="st-open"><i data-icon="open" data-size="28"></i><b>Open .etbrmap</b><small>Continue a saved level</small></button>
+          <button class="start-tile" id="st-join"><i data-icon="people" data-size="28"></i><b>Join a friend</b><small>Enter their 6-letter room code</small></button>
         </div>
         <div id="recent" class="recent"></div>
         <div class="who">
@@ -46,36 +46,36 @@
   <!-- ============ editor ============ -->
   <section id="app" class="screen" hidden>
     <header id="topbar">
-      <div class="logo small"><span class="logo-mark">▚</span> ETBR <b>Mapper</b></div>
+      <div class="logo small"><span class="logo-mark"></span> ETBR <b>Mapper</b></div>
       <input id="level-name" class="level-name" title="Level name" />
       <div class="tb-group">
-        <button data-act="new" title="New level (Ctrl+N)">New</button>
-        <button data-act="open" title="Open (Ctrl+O)">Open</button>
-        <button data-act="save" title="Save (Ctrl+S)">Save</button>
-        <button data-act="export" class="accent-outline" title="Export as .etbrmap (Ctrl+Shift+S)">Export .etbrmap</button>
+        <button data-act="new" title="New level (Ctrl+N)"><i data-icon="new"></i><span class="lbl"> New</span></button>
+        <button data-act="open" title="Open (Ctrl+O)"><i data-icon="open"></i><span class="lbl"> Open</span></button>
+        <button data-act="save" title="Save (Ctrl+S)"><i data-icon="save"></i><span class="lbl"> Save</span></button>
+        <button data-act="export" class="accent-outline" title="Export as .etbrmap (Ctrl+Shift+S)"><i data-icon="export"></i> Export .etbrmap</button>
       </div>
       <div class="tb-group">
-        <button data-act="undo" title="Undo (Ctrl+Z)">↶</button>
-        <button data-act="redo" title="Redo (Ctrl+Y)">↷</button>
+        <button data-act="undo" title="Undo (Ctrl+Z)"><i data-icon="undo"></i></button>
+        <button data-act="redo" title="Redo (Ctrl+Y)"><i data-icon="redo"></i></button>
       </div>
       <div class="tb-group tools" id="tools">
-        <button data-tool="select" data-gizmo="translate" title="Move (W)" class="on">✥ Move</button>
-        <button data-tool="select" data-gizmo="rotate" title="Rotate (E)">⟳ Rotate</button>
-        <button data-tool="select" data-gizmo="scale" title="Scale (R)">⤢ Scale</button>
-        <button data-tool="room" title="Room builder (B)">▣ Room</button>
+        <button data-tool="select" data-gizmo="translate" title="Move (W)" class="on"><i data-icon="move"></i><span class="lbl"> Move</span></button>
+        <button data-tool="select" data-gizmo="rotate" title="Rotate (E)"><i data-icon="rotate"></i><span class="lbl"> Rotate</span></button>
+        <button data-tool="select" data-gizmo="scale" title="Scale (R)"><i data-icon="scale"></i><span class="lbl"> Scale</span></button>
+        <button data-tool="room" title="Room builder (B)"><i data-icon="room"></i><span class="lbl"> Room</span></button>
       </div>
       <div class="tb-group">
         <label class="snap" title="Snapping (G)"><input type="checkbox" id="snap-on" checked /> Snap</label>
         <select id="snap-grid" title="Grid size">
           <option value="0.25">25 cm</option><option value="0.5">50 cm</option><option value="1" selected>1 m</option><option value="2">2 m</option><option value="4">4 m</option>
         </select>
-        <button data-act="lighting" id="btn-lighting" title="Toggle preview lighting (L)">☀ Bright</button>
+        <button data-act="lighting" id="btn-lighting" title="Toggle preview lighting (L)"><i data-icon="sun"></i><span class="lbl"> Bright</span></button>
       </div>
       <div class="spacer"></div>
       <div class="tb-group">
-        <button data-act="collab" id="btn-collab" class="collab-btn" title="Collaborate live">🤝 Collab</button>
-        <button data-act="play" class="primary" title="Test in the real game — edits show up live (Ctrl+P)">🎮 Test in game</button>
-        <button data-act="help" title="Help & shortcuts (?)">?</button>
+        <button data-act="collab" id="btn-collab" class="collab-btn" title="Collaborate live"><i data-icon="people"></i> Collab</button>
+        <button data-act="play" class="primary" title="Test in the real game — edits show up live (Ctrl+P)"><i data-icon="gamepad"></i> Test in game</button>
+        <button data-act="help" title="Help & shortcuts (?)"><i data-icon="help"></i></button>
       </div>
     </header>
 
