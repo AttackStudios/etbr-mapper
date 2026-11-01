@@ -29,7 +29,7 @@ const REST_URL = process.env.UPSTASH_REDIS_REST_URL;
 const REST_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const ROOM_TTL = 60 * 60 * 24 * 60; // 60 days
 const MAX_OBJECTS = 20000;
-const MAX_MSG = 4 * 1024 * 1024;
+const MAX_MSG = 24 * 1024 * 1024; // custom assets carry their models/textures/sounds
 
 // ---------- persistence ----------
 async function redis(cmd) {
@@ -45,15 +45,25 @@ async function redis(cmd) {
   } catch (e) { console.error('redis', e.message); return null; }
 }
 const memStore = new Map(); // fallback when no Upstash (local dev)
+// Maps (with embedded custom assets) can be several MB; Upstash requests are size-limited,
+// so values are stored in 512 KB chunks: etbr:room:CODE = "chunks:N", etbr:room:CODE:i = part i.
+const CHUNK = 512 * 1024;
 async function saveMap(code, map) {
   const s = JSON.stringify(map);
   if (!REST_URL) { memStore.set(code, s); return; }
-  await redis(['SET', `etbr:room:${code}`, s, 'EX', String(ROOM_TTL)]);
+  const n = Math.max(1, Math.ceil(s.length / CHUNK));
+  for (let i = 0; i < n; i++) await redis(['SET', `etbr:room:${code}:${i}`, s.slice(i * CHUNK, (i + 1) * CHUNK), 'EX', String(ROOM_TTL)]);
+  await redis(['SET', `etbr:room:${code}`, `chunks:${n}`, 'EX', String(ROOM_TTL)]);
 }
 async function loadMap(code) {
   if (!REST_URL) { const s = memStore.get(code); return s ? JSON.parse(s) : null; }
-  const s = await redis(['GET', `etbr:room:${code}`]);
-  return s ? JSON.parse(s) : null;
+  const head = await redis(['GET', `etbr:room:${code}`]);
+  if (!head) return null;
+  if (!String(head).startsWith('chunks:')) return JSON.parse(head); // rooms saved before chunking
+  const n = parseInt(String(head).slice(7), 10);
+  let s = '';
+  for (let i = 0; i < n; i++) { const part = await redis(['GET', `etbr:room:${code}:${i}`]); if (part == null) return null; s += part; }
+  return JSON.parse(s);
 }
 
 // ---------- maps ----------
@@ -170,6 +180,13 @@ function applyOp(room, op, user) {
     case 'cfg': {
       const k = op.k === 'meta' ? 'meta' : 'settings';
       m[k] = Object.assign(m[k] || {}, op.patch || {});
+      return null;
+    }
+    case 'asset': { // a custom .etbrObject/.etbrEntity/.etbrItem used by this map (sent once, shared by id)
+      const a = op.asset;
+      if (!a || typeof a.id !== 'string' || !/^[\w-]{4,64}$/.test(a.id)) return 'bad asset';
+      m.customAssets = m.customAssets || {};
+      m.customAssets[a.id] = a;
       return null;
     }
     case 'replace': {

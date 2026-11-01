@@ -91,6 +91,11 @@ export class Doc {
         Object.assign(this.map[k], clone(op.patch));
         return { o: 'cfg', k, patch: old };
       }
+      case 'asset': { // custom asset embedded in the map (never removed by undo: other objects may use it)
+        this.map.customAssets = this.map.customAssets || {};
+        this.map.customAssets[op.asset.id] = op.asset;
+        return null;
+      }
       case 'replace': {
         const prev = this.map;
         this.map = clone(op.map); this.reindex();
