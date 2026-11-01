@@ -19,6 +19,7 @@ using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Objects.UObject;
 using CUE4Parse.UE4.Versions;
+using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse_Conversion.Textures;
 using SkiaSharp;
 
@@ -48,6 +49,7 @@ static class P
             "scan" => Scan(prov, a[2]),
             "library" => Library(prov, a[1], a[2], a.Contains("--force"), a.SkipWhile(x => x != "--only").Skip(1).FirstOrDefault()),
             "probe" => Probe(prov, a[3], a.Length > 4 ? a[4] : null),
+            "placements" => Placements(prov, a[3], a[4]),
             _ => 1,
         };
     }
@@ -148,14 +150,41 @@ static class P
         int h(float v) => Math.Clamp((int)Math.Round(Math.Pow(Math.Clamp(v, 0, 1), 1 / 2.2) * 255), 0, 255);
         return $"#{h(c.R):x2}{h(c.G):x2}{h(c.B):x2}";
     }
-    static string ExportDiffuse(UMaterialInterface mat, string libDir, out string tint)
+    // Unreal "Two Sided" flag: material instances can override it, otherwise inherit from the parent
+    static bool IsTwoSided(UObject m, int depth = 0)
     {
-        tint = null;
+        if (m == null || depth > 10) return false;
+        try
+        {
+            if (m.TryGetValue(out FStructFallback ov, "BasePropertyOverrides"))
+            {
+                if (ov.TryGetValue(out bool over, "bOverride_TwoSided") && over && ov.TryGetValue(out bool ts, "TwoSided")) return ts;
+            }
+            if (m.TryGetValue(out bool two, "TwoSided")) return two;
+            if (m.TryGetValue(out FPackageIndex parent, "Parent") && !parent.IsNull) return IsTwoSided(parent.Load(), depth + 1);
+        }
+        catch { }
+        return false;
+    }
+    static string ExportDiffuse(UMaterialInterface mat, string libDir, out string tint, out bool emissive, out float tiling)
+    {
+        tint = null; emissive = false; tiling = 1;
         if (mat == null) return null;
         try
         {
             var prm = new CMaterialParams2();
             mat.GetParams(prm, EMaterialDepth.AllLayers);
+            if (Environment.GetEnvironmentVariable("ETBR_MATDBG") == "1")
+                Console.WriteLine($"MAT {mat.Name} tex[{string.Join(",", prm.Textures.Keys)}] col[{string.Join(",", prm.Colors.Select(kv => kv.Key + "=" + kv.Value.R.ToString("0.##") + "/" + kv.Value.G.ToString("0.##") + "/" + kv.Value.B.ToString("0.##")))}] sc[{string.Join(",", prm.Scalars.Select(kv => kv.Key + "=" + kv.Value.ToString("0.##")))}]");
+            // self-lit (emissive) materials: lamps, screens, exit signs…
+            // ETB's master material always has an Emissive input; what matters is its strength
+            // (EmissiveMultiplier is 1 on walls/floors, 65 on the fluorescent lamps)
+            foreach (var (k, v) in prm.Scalars)
+                if ((k.Contains("Emissive", StringComparison.OrdinalIgnoreCase) || k.Contains("Glow", StringComparison.OrdinalIgnoreCase) || k.Contains("Intensity", StringComparison.OrdinalIgnoreCase)) && v > 1.5f) { emissive = true; break; }
+            if (!emissive) foreach (var (k, c) in prm.Colors)
+                if (k.Contains("Emissive", StringComparison.OrdinalIgnoreCase) && Math.Max(c.R, Math.Max(c.G, c.B)) > 1.5f) { emissive = true; break; }
+            foreach (var (k, v) in prm.Scalars)
+                if ((k.Equals("Tiling", StringComparison.OrdinalIgnoreCase) || k.Equals("UVTiling", StringComparison.OrdinalIgnoreCase) || k.Equals("Tile", StringComparison.OrdinalIgnoreCase)) && v > 0.01f && Math.Abs(v - 1) > 0.001f) { tiling = v; break; }
             foreach (var names in CMaterialParams2.DiffuseColors)
                 if (prm.TryGetLinearColor(out var lc, names)) { tint = Hex(lc); break; }
             if (tint == null) foreach (var (k, c) in prm.Colors) if (k.Contains("Color", StringComparison.OrdinalIgnoreCase) || k.Contains("Tint", StringComparison.OrdinalIgnoreCase)) { tint = Hex(c); break; }
@@ -237,11 +266,14 @@ static class P
                         }
                         var b = sm.RenderData?.Bounds;
                         if (b != null) it["bounds"] = new { o = V(b.Origin), e = V(b.BoxExtent) };
-                        var tex = new List<string>(); var tints = new List<string>();
+                        var tex = new List<string>(); var tints = new List<string>(); var twos = new List<bool>(); var emis = new List<bool>(); var tiles = new List<float>();
                         if (sm.StaticMaterials != null)
-                            foreach (var m in sm.StaticMaterials) { UMaterialInterface mi = null; try { mi = m.MaterialInterface?.Load<UMaterialInterface>(); } catch { } tex.Add(ExportDiffuse(mi, libDir, out var tn)); tints.Add(tn); }
+                            foreach (var m in sm.StaticMaterials) { UMaterialInterface mi = null; try { mi = m.MaterialInterface?.Load<UMaterialInterface>(); } catch { } tex.Add(ExportDiffuse(mi, libDir, out var tn, out var em, out var tl)); tints.Add(tn); twos.Add(IsTwoSided(mi)); emis.Add(em); tiles.Add(tl); }
                         it["tex"] = tex;
                         if (tints.Any(x => x != null)) it["tint"] = tints;
+                        if (twos.Any(x => x)) it["two"] = twos;
+                        if (emis.Any(x => x)) it["emis"] = emis;
+                        if (tiles.Any(x => x != 1)) it["tile"] = tiles;
                         if (usage.TryGetValue(id, out var lv)) it["levels"] = lv.OrderBy(x => x).ToList();
                         items.Add(it); Interlocked.Increment(ref meshN);
                     }
@@ -378,6 +410,26 @@ static class P
         }
         catch (Exception e) { Console.WriteLine("ERR parts " + bgc.Name + " " + e.Message); }
         return parts;
+    }
+
+    // how a map places a given mesh: rotation/scale stats of every component using it
+    static int Placements(DefaultFileProvider prov, string mapPath, string meshSub)
+    {
+        var pkg = prov.LoadPackage(mapPath);
+        var counts = new Dictionary<string, int>();
+        foreach (var e in pkg.GetExports())
+        {
+            if (e.ExportType == null || !e.ExportType.Contains("StaticMeshComponent")) continue;
+            if (!e.TryGetValue(out FPackageIndex mi, "StaticMesh") || mi.IsNull) continue;
+            var mp = mi.ResolvedObject?.GetPathName() ?? "";
+            if (!mp.Contains(meshSub, StringComparison.OrdinalIgnoreCase)) continue;
+            var r = e.TryGetValue(out FRotator rr, "RelativeRotation") ? rr : new FRotator(0, 0, 0);
+            var sc = e.TryGetValue(out FVector ss, "RelativeScale3D") ? ss : new FVector(1, 1, 1);
+            var key = $"{mp.Split('/').Last()}  {e.ExportType}  rot(P{Math.Round(r.Pitch)},Y{Math.Round(r.Yaw)},R{Math.Round(r.Roll)})  scale({sc.X:0.##},{sc.Y:0.##},{sc.Z:0.##})";
+            counts[key] = counts.GetValueOrDefault(key) + 1;
+        }
+        foreach (var (k, v) in counts.OrderByDescending(x => x.Value).Take(25)) Console.WriteLine($"{v,6}  {k}");
+        return 0;
     }
 
     // ------------------------------------------------------------------ probe

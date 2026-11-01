@@ -122,7 +122,7 @@ export class Viewport extends EventTarget {
       else if (op.o === 'del') this.removeFor(op.id);
       else if (op.o === 'set') {
         const it = this.doc.get(c, op.id); if (!it) continue;
-        if ('asset' in op.patch || 'props' in op.patch || 'type' in op.patch || 'kind' in op.patch) { this.removeFor(op.id, true); await this.createFor(c, it); }
+        if ('asset' in op.patch || 'props' in op.patch || 'type' in op.patch || 'kind' in op.patch || 'group' in op.patch) { this.removeFor(op.id, true); await this.createFor(c, it); }
         else this.applyTransform(this.objects.get(op.id), c, it);
       }
     }
@@ -532,23 +532,26 @@ export class Viewport extends EventTarget {
     if (nx * nz > 900) return this.app.toast('That room is huge — try something smaller (max 30×30 tiles)');
     const y = this.workY, H = (kit.height || 400) / 100;
     const ops = [];
-    const add = (assetId, cx, cy, cz, yaw = 0, extra = {}) => {
+    const add = (assetId, cx, cy, cz, yaw = 0, extra = {}, roll = 0) => {
       const it = this.catalog.get(assetId); if (!it) return;
       // place so the mesh's bounds centre lands on (cx, ?, cz) and its bottom on cy
       const b = it.bounds || { o: [0, 0, 0], e: [0, 0, 0] };
-      const q = ueRotToQuat([0, yaw, 0]);
+      const q = ueRotToQuat([0, yaw, roll]);
       const o = ueToThreePos(b.o).applyQuaternion(q);
       const halfH = b.e[2] / 100;
       const pos = new THREE.Vector3(cx - o.x, cy + halfH - o.y, cz - o.z);
-      ops.push({ o: 'add', c: 'objects', item: { id: newId('o'), asset: assetId, kind: it.kind, pos: threeToUePos(pos), rot: [0, yaw, 0], scale: [1, 1, 1], layer: this.app.activeLayer || 'Default', ...extra } });
+      ops.push({ o: 'add', c: 'objects', item: { id: newId('o'), asset: assetId, kind: it.kind, pos: threeToUePos(pos), rot: [0, yaw, roll], scale: [1, 1, 1], layer: this.app.activeLayer || 'Default', ...extra } });
     };
     for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
       const cx = x0 + (i + 0.5) * cell, cz = z0 + (j + 0.5) * cell;
       if (kit.floor) add(kit.floor, cx, y - this._thick(kit.floor), cz);
-      if (kit.ceiling) add(kit.ceiling, cx, y + H, cz);
+      // the game places Level 0 ceiling tiles as floor-facing meshes rolled 180°
+      if (kit.ceiling) add(kit.ceiling, cx, y + H, cz, 0, {}, kit.ceilingRoll ?? 180);
       if (kit.light && kit.lightEvery && (i % kit.lightEvery === 0) && (j % kit.lightEvery === 0)) {
-        add(kit.light, cx, y + H - this._thick(kit.light) - 0.005, cz);
-        if (kit.pointLight) ops.push({ o: 'add', c: 'objects', item: { id: newId('o'), asset: '/Script/Engine.PointLight', kind: 'actor', pos: threeToUePos(new THREE.Vector3(cx, y + H - 0.3, cz)), rot: [0, 0, 0], scale: [1, 1, 1], layer: this.app.activeLayer || 'Default', props: { intensity: 2500, color: '#fff3c4', radius: 900 } } });
+        const li = this.catalog.get(kit.light);
+        if (li?.kind === 'actor') add(kit.light, cx, y + H, cz); // game lamp blueprint: brings its own real light
+        else add(kit.light, cx, y + H - this._thick(kit.light) - 0.005, cz);
+        if (kit.pointLight && li?.kind !== 'actor') ops.push({ o: 'add', c: 'objects', item: { id: newId('o'), asset: '/Script/Engine.PointLight', kind: 'actor', pos: threeToUePos(new THREE.Vector3(cx, y + H - 0.3, cz)), rot: [0, 0, 0], scale: [1, 1, 1], layer: this.app.activeLayer || 'Default', props: { intensity: 2500, color: '#fff3c4', radius: 900 } } });
       }
     }
     if (kit.wall) {
@@ -668,12 +671,13 @@ export function logicVolume(it) {
   const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18, depthWrite: false }));
   const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), new THREE.LineBasicMaterial({ color }));
   g.add(m, e);
-  const lbl = document.createElement('canvas'); lbl.width = 256; lbl.height = 64;
+  const lbl = document.createElement('canvas'); lbl.width = 512; lbl.height = 64;
   const c = lbl.getContext('2d'); c.fillStyle = color; c.font = '700 34px Inter, Segoe UI, sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
-  c.fillText((LOGIC_TYPES.find((t) => t.type === it.type)?.name || it.type).toUpperCase(), 128, 32);
+  const label = (LOGIC_TYPES.find((t) => t.type === it.type)?.name || it.type).toUpperCase() + (it.group ? ' · ' + it.group : '');
+  c.fillText(label, 256, 32);
   const t = new THREE.CanvasTexture(lbl); t.colorSpace = THREE.SRGBColorSpace;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
-  s.scale.set(0.8, 0.2, 1); s.userData.isLabel = true; s.renderOrder = 8; g.add(s);
+  s.scale.set(1.6, 0.2, 1); s.userData.isLabel = true; s.renderOrder = 8; g.add(s);
   return g;
 }
 function spawnMarker() {

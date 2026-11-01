@@ -1,6 +1,6 @@
 // Minimal GLB writer for UStaticMesh LOD0.
 // Converts Unreal (cm, Z-up, left-handed) to Three.js/glTF (m, Y-up, right-handed):
-//   gl = (ue.X, ue.Z, ue.Y) / 100   — an axis swap (reflection), so triangle winding is flipped.
+//   gl = (ue.X, ue.Z, ue.Y) / 100   — an axis swap (reflection): UE clockwise fronts become CCW, which is glTF front-facing, so indices are kept as-is.
 // One glTF node per material section, named "mi<MaterialIndex>", so the editor can texture each section.
 using System.Text;
 using System.Text.Json;
@@ -49,7 +49,7 @@ static class Glb
             for (int t = 0; t < sec.NumTriangles; t++)
             {
                 int i = sec.FirstIndex + t * 3;
-                bw.Write((uint)ib[i]); bw.Write((uint)ib[i + 2]); bw.Write((uint)ib[i + 1]); // flip winding
+                bw.Write((uint)ib[i]); bw.Write((uint)ib[i + 1]); bw.Write((uint)ib[i + 2]); // UE clockwise front faces become CCW after the axis swap = glTF front faces
             }
             bufferViews.Add(new { buffer = 0, byteOffset = off, byteLength = sec.NumTriangles * 12, target = 34963 });
             accessors.Add(new { bufferView = bufferViews.Count - 1, componentType = 5125, count = sec.NumTriangles * 3, type = "SCALAR" });

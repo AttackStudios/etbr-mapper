@@ -99,9 +99,14 @@ export class Catalog {
   }
   material(item, idx) {
     const tex = item.tex?.[idx] || null, tint = item.tint?.[idx] || null;
-    const key = (tex || '-') + '|' + (tint || '-');
+    const two = !!item.two?.[idx], emis = !!item.emis?.[idx], tile = item.tile?.[idx] || 1;
+    const key = (tex || '-') + '|' + (tint || '-') + (two ? '|2' : '') + (emis ? '|e' : '') + '|' + tile;
     if (this.matCache.has(key)) return this.matCache.get(key);
-    const m = new THREE.MeshStandardMaterial({ map: this.texture(tex), color: tint || (tex ? '#ffffff' : '#9a9486'), roughness: 0.85, metalness: 0, side: THREE.DoubleSide });
+    // one-sided unless Unreal marks the material Two Sided — same as the game, and lets you see into rooms from above
+    let map = this.texture(tex);
+    if (map && tile !== 1) { map = map.clone(); map.repeat.set(tile, tile); map.needsUpdate = true; } // the material's Tiling parameter
+    const m = new THREE.MeshStandardMaterial({ map, color: tint || (tex ? '#ffffff' : '#9a9486'), roughness: 0.85, metalness: 0, side: two ? THREE.DoubleSide : THREE.FrontSide });
+    if (emis) { m.emissive.set(tint || '#fff6dd'); m.emissiveMap = map; m.emissiveIntensity = 1.6; }
     this.matCache.set(key, m);
     return m;
   }
@@ -154,6 +159,7 @@ export class Catalog {
         parent.add(t.clone(true));
       }
       if (item.cat === 'entities') g.add(placeholder(item.name, '#ff5577', 1.8, true));
+      if (item.cat === 'lights') { const l = new THREE.PointLight('#fff3c4', 3, 9, 1.5); l.position.y = -0.3; g.add(l); }
       return g;
     }
     if (item.cat === 'entities') return placeholder(item.name, '#ff5577', 1.8, true);

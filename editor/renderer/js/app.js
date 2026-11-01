@@ -355,8 +355,10 @@ class App {
       name: 'Level 0 (yellow rooms)',
       floor: find(/\/SM_Floor_4m\.SM_Floor_4m$/, 'Level0') || find(/SM_Floor_4m/),
       ceiling: find(/\/SM_Ceiling_4m\.SM_Ceiling_4m$/, 'Level0') || find(/SM_Ceiling_4m/),
-      wall, light: find(/\/SM_Ceiling_Light\.SM_Ceiling_Light$/, 'Level0') || find(/SM_Ceiling_Light/),
-      pointLight: true, lightEvery: 2, cell: 400,
+      wall,
+      // the exact lamp actor Level 0 uses (fixture + its real light); falls back to the bare mesh
+      light: this.catalog.items.find((i) => i.kind === 'actor' && /\/BP_Ceiling_2Light\.BP_Ceiling_2Light_C$/.test(i.id) && i.levels?.includes('Level0'))?.id || find(/SM_Ceiling_Light/),
+      pointLight: false, lightEvery: 2, cell: 400, ceilingRoll: 180,
       height: wi?.bounds ? Math.round(wi.bounds.e[2] * 2) : 400,
     };
   }
