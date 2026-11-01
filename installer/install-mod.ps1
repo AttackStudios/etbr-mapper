@@ -45,6 +45,7 @@ if (-not (Test-Path (Join-Path $win64 'ue4ss\UE4SS.dll'))) {
 $dst = Join-Path $mods 'ETBRLoader'
 New-Item -ItemType Directory -Force -Path (Join-Path $dst 'Scripts'), (Join-Path $dst 'maps') | Out-Null
 Copy-Item -Force (Join-Path $Payload 'ETBRLoader\Scripts\*') (Join-Path $dst 'Scripts')
+Get-ChildItem (Join-Path $Payload 'ETBRLoader') -File | ForEach-Object { Copy-Item -Force $_.FullName $dst }  # fontatlas.png etc.
 Write-Output "Installed ETBR Loader to $dst"
 
 # 3) enable it in mods.txt (above the built-in Keybinds line)

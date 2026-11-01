@@ -4,6 +4,9 @@ return {
   keyLoad = 'F7',      -- load last / newest map
   keyStart = 'F6',     -- teleport to spawn (host: everyone)
   keyUnload = 'F8',    -- remove custom level
+  keyPickup = 'E',     -- pick up a custom item (same key as the game's interact)
+  keyUse = 'G',        -- use the custom item in your hand
+  keyDrop = 'X',       -- drop it
   batchSize = 120,     -- objects spawned per tick (lower = smoother, slower)
   batchDelayMs = 30,
   livePollMs = 250,    -- live test: how often to check for edits (ms)

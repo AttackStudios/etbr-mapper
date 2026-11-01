@@ -117,6 +117,7 @@ custom.init({
   world = function() return currentWorld() end,
   log = function(m) log(m) end,
   CACHE_DIR = MOD_DIR .. 'cache\\',
+  -- the rest are filled in further down once those helpers exist
 })
 
 -- Lights spawned at runtime must be Movable: Static/Stationary lights rely on baked lighting and render
@@ -170,11 +171,7 @@ end
 local function applyProps(a, o)
   local p = o.props or {}
   if o.kind == 'mesh' then pcall(function() a:SetActorEnableCollision(not p.noCollision) end) end
-  if o.kind == 'text' then
-    local c = a.TextRender
-    c:SetText(FText(p.text or 'Text')); c:SetWorldSize(p.size or 40)
-    c:SetTextRenderColor(hexColor(p.color, 1)); c:SetHorizontalAlignment(1)
-  end
+  -- text objects are glyph meshes (FText crashes this UE4SS build); props are applied when built
   local okL, lc = pcall(function() return a.LightComponent end)
   local isComp = okL and lc and type(lc) ~= 'function' and pcall(function() return lc:IsValid() end) and lc:IsValid()
   if isComp then
@@ -196,17 +193,19 @@ local function spawnObject(o)
     c:SetMobility(2) -- Movable, so SetStaticMesh works at runtime (and live edits can move it)
     c:SetStaticMesh(mesh)
   elseif o.kind == 'text' then
-    a = spawn(findObj(classCache, TEXT_CLASS), loc)
-    if not a then return nil, 'spawn failed' end
+    local p = o.props or {}
+    a = custom.textActor(loc, p.text or 'Text', p.size or 40, p.color)
+    if not a then return nil, 'text failed' end
   elseif o.kind == 'custom' then
     local asset = state.map and state.map.customAssets and state.map.customAssets[o.asset]
     if not asset then return nil, 'custom asset not in map' end
-    if asset.kind == 'object' then
-      local err; a, err = custom.spawnObject(asset, loc)
-      if not a then return nil, err end
-    else
-      return nil, 'custom ' .. tostring(asset.kind) .. ' not supported yet'
-    end
+    local err
+    if asset.kind == 'object' then a, err = custom.spawnObject(asset, loc)
+    elseif asset.kind == 'entity' then a, err = custom.spawnEntity(asset, loc, (o.rot or {})[2])
+    elseif asset.kind == 'item' then a, err = custom.spawnItem(asset, loc)
+    else return nil, 'unknown custom kind ' .. tostring(asset.kind) end
+    if not a then return nil, err end
+    if asset.kind == 'entity' then return a end -- the entity places itself (capsule height, yaw)
   else
     local cls = findObj(classCache, o.asset)
     if not cls then return nil, 'class not found' end
@@ -298,6 +297,7 @@ local function buildMap(map, label, out, onDone)
   state.worldId = worldId()
   state.map, state.name, state.loading = map, label, true
   state.offset = (map.settings or {}).offset or cfg.defaultOffset
+  pcall(custom.setNav, (map.settings or {}).nav)
   local objs = map.objects or {}
   local i, okN, failN, fails = 0, 0, 0, {}
   say(out, ('building "%s" — %d objects…'):format((map.meta and map.meta.name) or label, #objs))
@@ -377,6 +377,53 @@ local function teleport(pp, loc, rot)
   if not ok then pcall(function() pp.pawn:K2_TeleportTo(loc, rot) end) end
   pcall(function() pp.pc:SetControlRotation(rot) end)
 end
+local popup -- defined below (forward declaration so the custom helpers can use it)
+-- remaining custom-content helpers (need playerPawns/teleport/popup from above)
+do
+  local env = custom._env or {}
+  local function rotToQuat(r)
+    local p, y, ro = math.rad(r[1] or 0) / 2, math.rad(r[2] or 0) / 2, math.rad(r[3] or 0) / 2
+    local SP, CP, SY, CY, SR, CR = math.sin(p), math.cos(p), math.sin(y), math.cos(y), math.sin(ro), math.cos(ro)
+    return { X = CR * SP * SY - SR * CP * CY, Y = -CR * SP * CY - SR * CP * SY, Z = CR * CP * SY - SR * SP * CY, W = CR * CP * CY + SR * SP * SY }
+  end
+  custom.init({
+    spawn = function(c, l) return spawn(c, l) end,
+    findClass = function(p) return findObj(classCache, p) end,
+    findObj = function(p) return findObj(assetCache, p) end,
+    world = function() return currentWorld() end,
+    log = function(m) log(m) end,
+    CACHE_DIR = MOD_DIR .. 'cache\\',
+    MOD_DIR = MOD_DIR,
+    offset = function() return state.offset end,
+    rotToQuat = rotToQuat,
+    players = function()
+      local me = localPC(); local t = {}
+      for _, pp in ipairs(playerPawns()) do pp.key = pp.pc:GetFullName(); pp.isLocal = me and pp.pc:GetAddress() == me:GetAddress(); t[#t + 1] = pp end
+      return t
+    end,
+    localPawn = function() local pc = localPC(); return pc and pc.Pawn and pc.Pawn:IsValid() and pc.Pawn or nil end,
+    localPlayer = function() local pc = localPC(); return { pc = pc, pawn = pc.Pawn, isLocal = true } end,
+    message = function(text) local pc = localPC(); if pc then pcall(popup, pc, text) end end,
+    -- the game's own death (same path its monsters use): server RPC first, native fallback
+    kill = function(pp)
+      local ok = pcall(function() pp.pawn:KillServer() end)
+      if not ok then ok = pcall(function() pp.pawn:KillPlayer() end) end
+      log(ok and 'entity killed a player' or 'entity kill: game kill function not callable')
+    end,
+    addSanity = function(pp, d) pcall(function() local ps = pp.pc.PlayerState; ps.Sanity = math.max(0, math.min(100, (ps.Sanity or 100) + d)) end) end,
+  })
+end
+LoopAsync(50, function()
+  ExecuteInGameThread(function()
+    if state.map and not state.loading and checkWorld() then pcall(custom.tickEntities, 0.05) end
+    pcall(custom.tickTimers)
+  end)
+  return false
+end)
+RegisterKeyBind(Key[cfg.keyPickup], function() ExecuteInGameThread(function() pcall(custom.tryPickup) end) end)
+RegisterKeyBind(Key[cfg.keyUse], function() ExecuteInGameThread(function() pcall(custom.useHand) end) end)
+RegisterKeyBind(Key[cfg.keyDrop], function() ExecuteInGameThread(function() pcall(custom.dropHand) end) end)
+
 local function start(out)
   if not state.map then return say(out, 'no map loaded — etbr load <name> or etbr live first') end
   if isHost() then
@@ -394,16 +441,14 @@ local function inside(p, l)
   local c, s = W(l.pos), l.size or { 200, 200, 200 }
   return math.abs(p.X - c.X) <= s[1] / 2 and math.abs(p.Y - c.Y) <= s[2] / 2 and math.abs(p.Z - c.Z) <= s[3] / 2
 end
-local function popup(pc, text)
+popup = function(pc, text)
   local pawn = pc.Pawn; if not pawn or not pawn:IsValid() then return end
   local loc = pawn:K2_GetActorLocation()
   local rot = pc:GetControlRotation()
   local yaw = math.rad(rot.Yaw)
-  local a = spawn(findObj(classCache, TEXT_CLASS), vec(loc.X + math.cos(yaw) * 220, loc.Y + math.sin(yaw) * 220, loc.Z + 40))
+  local a = custom.textActor(vec(loc.X + math.cos(yaw) * 220, loc.Y + math.sin(yaw) * 220, loc.Z + 40), text, 14, '#fff3c4')
   if not a then return end
-  a.TextRender:SetText(FText(text)); a.TextRender:SetWorldSize(22); a.TextRender:SetHorizontalAlignment(1)
-  a.TextRender:SetTextRenderColor(hexColor('#fff3c4'))
-  a:K2_SetActorRotation({ Pitch = 0, Yaw = rot.Yaw + 180, Roll = 0 }, false)
+  a:K2_SetActorRotation({ Pitch = 0, Yaw = rot.Yaw + 180, Roll = 0 }, false) -- face the player
   popups[#popups + 1] = { a = a, t = os.clock() + 4 }
 end
 -- Entity Spawn Areas (host only): each group waits a random min..max seconds, then spawns its
@@ -532,6 +577,7 @@ local function applyOps(ops)
     elseif op.o == 'cfg' then
       local k = op.k == 'meta' and 'meta' or 'settings'
       m[k] = m[k] or {}; merge(m[k], op.patch or {})
+      if k == 'settings' and op.patch and op.patch.nav ~= nil then pcall(custom.setNav, op.patch.nav) end
       if op.patch and (op.patch.offset or op.patch.lighting or op.patch.lightBoost) then state.live.rev = -1 end -- full rebuild
     elseif op.o == 'asset' and op.asset then
       m.customAssets = m.customAssets or {}
@@ -677,6 +723,39 @@ if readFile(MOD_DIR .. 'dev.enable') then
         for w in line:gmatch('%S+') do words[#words + 1] = w end
         if words[1] == 'etbr' then table.remove(words, 1); pcall(handle, words, nil)
         elseif words[1] == 'ue' then local c = line:sub(4); ExecuteInGameThread(function() console(c) end)
+        elseif words[1] == 'sig' then -- sig <FunctionName> : parameter list of that function on the pawn's class chain
+          ExecuteInGameThread(function()
+            local cls = localPC().Pawn:GetClass()
+            while cls and cls:IsValid() do
+              local fn = nil
+              pcall(function() cls:ForEachFunction(function(f) if f:GetFName():ToString() == words[2] then fn = f end end) end)
+              if fn then
+                log('sig ' .. cls:GetFName():ToString() .. '::' .. words[2])
+                pcall(function() fn:ForEachProperty(function(prop) log(('   %s : %s'):format(prop:GetFName():ToString(), prop:GetClass():GetFName():ToString())) end) end)
+                return
+              end
+              local ok, sup = pcall(function() return cls:GetSuperStruct() end)
+              if not ok or not sup or not sup:IsValid() then break end
+              cls = sup
+            end
+            log('sig: ' .. tostring(words[2]) .. ' not found')
+          end)
+        elseif words[1] == 'entdbg' then -- entdbg move|anim|speed|vel on|off
+          custom.dbg[words[2] or ''] = words[3] ~= 'off'; log('entdbg ' .. tostring(words[2]) .. '=' .. tostring(custom.dbg[words[2] or '']))
+        elseif words[1] == 'msgtest' then ExecuteInGameThread(function() log('msgtest start'); local pc = localPC(); pcall(popup, pc, table.concat(words, ' ', 2) ~= '' and table.concat(words, ' ', 2) or 'Hello from ETBR'); log('msgtest done') end)
+        elseif words[1] == 'pickup' then ExecuteInGameThread(function() log('dev pickup: ' .. tostring(select(2, pcall(custom.tryPickup)))) end)
+        elseif words[1] == 'use' then ExecuteInGameThread(function() pcall(custom.useHand); log('dev use') end)
+        elseif words[1] == 'ents' then ExecuteInGameThread(function()
+            for i, e in ipairs(custom.entities) do pcall(function()
+              local p = e.actor:K2_GetActorLocation()
+              local ctrl, mode, vel = 'none', '?', '?'
+              pcall(function() local c = e.actor.Controller; if c and c:IsValid() then ctrl = c:GetClass():GetFName():ToString() end end)
+              pcall(function() mode = tostring(e.actor.CharacterMovement.MovementMode) end)
+              pcall(function() local v = e.actor:GetVelocity(); vel = ('%.0f,%.0f,%.0f'):format(v.X, v.Y, v.Z) end)
+              log(('ent %d %s at %.0f %.0f %.0f state=%s chasing=%s speed=%s path=%s'):format(i, e.asset.name, p.X, p.Y, p.Z, e.state, tostring(e.chasing), tostring(e.vel), tostring(e.path and #e.path)))
+            end) end
+            log('ents: ' .. #custom.entities .. ', items: ' .. #custom.items)
+          end)
         elseif words[1] == 'hideui' then
           ExecuteInGameThread(function()
             pcall(function() StaticFindObject('/Script/UMG.Default__WidgetBlueprintLibrary'):RemoveAllWidgets(currentWorld()) end)
@@ -712,6 +791,27 @@ if readFile(MOD_DIR .. 'dev.enable') then
                 break
               end
             end
+          end)
+        elseif words[1] == 'funcs' then -- funcs <substr> [pawn|ps|gm|pc]: list UFunctions on that object's class chain
+          ExecuteInGameThread(function()
+            local pc = localPC()
+            local target = ({ pawn = function() return pc.Pawn end, ps = function() return pc.PlayerState end, pc = function() return pc end, gm = function() return FindFirstOf('GameModeBase') end })[words[3] or 'pawn']()
+            local want = (words[2] or ''):lower()
+            local cls = target:GetClass()
+            local n = 0
+            while cls and cls:IsValid() and n < 400 do
+              local cname = cls:GetFName():ToString()
+              pcall(function()
+                cls:ForEachFunction(function(f)
+                  local fn = f:GetFName():ToString()
+                  if fn:lower():find(want, 1, true) then log(('  %s::%s'):format(cname, fn)); n = n + 1 end
+                end)
+              end)
+              local ok, sup = pcall(function() return cls:GetSuperStruct() end)
+              if not ok or not sup or not sup:IsValid() then break end
+              cls = sup
+            end
+            log('funcs done (' .. n .. ')')
           end)
         elseif words[1] == 'lightinfo' then
           ExecuteInGameThread(function()

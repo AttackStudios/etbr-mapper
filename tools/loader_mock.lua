@@ -23,7 +23,7 @@ local worldN = 1
 local world = { IsValid = function() return true end, GetFullName = function() return 'World /Game/Mock' .. worldN end, GetAddress = function() return worldN end,
   SpawnActor = function(_, cls, loc) local a = newActor(cls, loc); spawned[#spawned + 1] = a; return a end }
 local pc = { IsValid = function() return true end, GetWorld = function() return world end, Pawn = { IsValid = function() return true end, K2_GetActorLocation = function() return pawnLoc end, K2_TeleportTo = function(_, l) pawnLoc = l end },
-  GetControlRotation = function() return { Yaw = 0 } end, SetControlRotation = function() end, GetFullName = function() return 'PC0' end }
+  GetControlRotation = function() return { Yaw = 0, Pitch = 0 } end, SetControlRotation = function() end, GetFullName = function() return "PC0" end, GetAddress = function() return 1 end }
 local objs = setmetatable({}, { __index = function(t, k) local o = { IsValid = function() return true end, name = k }; t[k] = o; return o end })
 StaticFindObject = function(p) if p:find('GameplayStatics') then return gs end; if p:find('Missing') then return nil end; return objs[p] end
 LoadAsset = function() return nil end
@@ -120,3 +120,43 @@ print(('spawns after travel without reloading: %d (expect 0)'):format(#spawned -
 ok, err = pcall(function() etbr('load', 'MockTest'); runLoops(3) end)
 print('reload in new world ok: ' .. tostring(ok) .. ' ' .. tostring(err or ''))
 os.remove('loader/ETBRLoader/maps/MockTest.etbrmap')
+
+
+print('--- ENTITY NAV (A* around a wall)')
+-- 20 x 20 cells of 50 cm; wall along cell column 10 except a doorway at rows 16-17
+local W, H = 20, 20
+local parts = {}
+for j = 0, H - 1 do for i = 0, W - 1 do
+  local blocked = (i == 10 and not (j == 16 or j == 17))
+  parts[#parts + 1] = string.pack('<i2', blocked and -32768 or 0)
+end end
+local floors = table.concat(parts)
+local function b64enc(data)
+  local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+  return ((data:gsub('.', function(x) local r, bb = '', x:byte(); for i = 8, 1, -1 do r = r .. (bb % 2 ^ i - bb % 2 ^ (i - 1) > 0 and '1' or '0') end; return r end) .. '0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+    if #x < 6 then return '' end; local c = 0; for i = 1, 6 do c = c + (x:sub(i, i) == '1' and 2 ^ (6 - i) or 0) end; return b:sub(c + 1, c + 1) end) .. ({ '', '==', '=' })[#data % 3 + 1])
+end
+local ent = '{"format":"etbr-asset","version":1,"kind":"entity","id":"navtest01","name":"Nav Tester","meshes":{},"textures":{},"sounds":{},"scripts":{},'
+  .. '"entity":{"parts":[],"anims":{},"map":{},"behavior":{"mode":"chase","walkSpeed":200,"runSpeed":300,"sight":5000,"loseSight":6000,"kill":false,"killRange":60}}}'
+local mapjson = '{"format":"etbrmap","version":1,"meta":{"name":"NavTest"},"settings":{"spawn":{"pos":[0,0,100],"yaw":0},"offset":[0,0,200000],'
+  .. '"nav":{"cell":50,"x0":0,"y0":0,"w":20,"h":20,"floors":"' .. b64enc(floors) .. '"}},'
+  .. '"objects":[{"id":"E1","asset":"navtest01","kind":"custom","pos":[125,125,0],"rot":[0,0,0],"scale":[1,1,1]}],'
+  .. '"logic":[],"customAssets":{"navtest01":' .. ent .. '}}'
+local f3 = real_open('loader/ETBRLoader/maps/NavTest.etbrmap', 'w'); f3:write(mapjson); f3:close()
+worldN = 3
+etbr('load', 'NavTest'); runLoops(3)
+pawnLoc = { X = 875, Y = 125, Z = 200090 } -- other side of the wall, same row
+local crossedAt, maxX = nil, 0
+for tick = 1, 400 do
+  runLoops(1)
+  local e = require('custom').entities[1]
+  if e then
+    local cx = math.floor((e.pos.X) / 50); local cy = math.floor((e.pos.Y) / 50)
+    if cx == 10 and not crossedAt then crossedAt = cy end
+    if e.pos.X > maxX then maxX = e.pos.X end
+  end
+end
+local e = require('custom').entities[1]
+print(('entity crossed the wall line at row %s (expect 16 or 17 = the doorway); now at %.0f,%.0f; reached player side: %s')
+  :format(tostring(crossedAt), e and e.pos.X or -1, e and e.pos.Y or -1, tostring(maxX > 550)))
+os.remove('loader/ETBRLoader/maps/NavTest.etbrmap')

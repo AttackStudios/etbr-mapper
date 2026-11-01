@@ -13,7 +13,7 @@ tar -czf "$J/payload.tgz" -C "$J" payload && scp -q -i "$KEY" "$J/payload.tgz" "
 s 'C:\Users\JackPC\ETBRMapper\redeploy-loader.cmd' | grep -E "DONE"
 s 'schtasks /Run /TN ETBRGameRun' >/dev/null
 for i in $(seq 1 25); do state_world | grep -q MainMenu && break; sleep 5; done; echo "menu ok"
-WAIT=2 ./tools/devcmd.sh "ue open Lobby" >/dev/null
+WAIT=2 ./tools/devcmd.sh "ue r.SetRes 1600x900f" "ue open Lobby" >/dev/null  # clicks assume fullscreen 1600x900
 for i in $(seq 1 15); do state_world | grep -q Lobby.Lobby && break; sleep 4; done; echo "lobby ok"
 printf 'click 1106 520\nwait 300\ntype %s\nkey {ENTER}\nwait 400\nclick 1106 744\n' "$SAVE" > "$J/click.txt"
 scp -q -i "$KEY" "$J/click.txt" "$PC:ETBRMapper/click.txt"; s 'schtasks /Run /TN ETBRClick' >/dev/null

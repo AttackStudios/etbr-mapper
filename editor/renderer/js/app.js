@@ -8,6 +8,7 @@ import { Tutorial } from './tutorial.js';
 import { icon, hydrateIcons, logoMark } from './icons.js';
 import { CustomUI } from './customui.js';
 import { KINDS } from './custom.js';
+import { bakeNav } from './nav.js';
 
 const api = window.etbr;
 const $ = (s, r = document) => r.querySelector(s);
@@ -111,7 +112,10 @@ class App {
     this.collab = new Collab(this);
     this.tutorial = new Tutorial(this);
     this.viewport.addEventListener('selection', () => { this.renderInspector(); this.renderOutlinerSel(); this.collab.sendSelection([...this.viewport.selection].filter((id) => id !== '__spawn')); this.status(); });
-    this.viewport.addEventListener('scenechange', () => { this.status(); this.renderInspectorSoon(); this.renderOutlinerSoon(); this.applyLayerVisibility(); });
+    this.viewport.addEventListener('scenechange', () => {
+      this.status(); this.renderInspectorSoon(); this.renderOutlinerSoon(); this.applyLayerVisibility();
+      if (this.collab?.connected && !this._navApplying) { clearTimeout(this._navT); this._navT = setTimeout(() => this.updateNav(), 3000); }
+    });
     this.viewport.addEventListener('dragmove', () => this.renderInspectorSoon());
     this.viewport.addEventListener('cursor', (e) => { const p = e.detail; $('#st-cursor').textContent = `${r1(p.x, 10)}, ${r1(p.z, 10)}, ${r1(p.y, 10)} m`; });
     this.collab.addEventListener('change', () => { this.renderPeople(); this.status(); });
@@ -185,7 +189,17 @@ class App {
       return true;
     } catch (e) { this.modal('Could not open', `<p>${esc(e.message)}</p>`); return false; }
   }
+  // entities in the level need the walk grid (baked here from the real scene, shipped inside the map)
+  updateNav() {
+    const hasEnt = this.doc.map.objects.some((o) => o.kind === 'custom' && this.catalog.get(o.asset)?.customKind === 'entity');
+    if (!hasEnt) { if (this.doc.map.settings.nav) this.doc.apply([{ o: 'cfg', k: 'settings', patch: { nav: null } }], { record: false }); return; }
+    const t0 = performance.now();
+    const nav = bakeNav(this.viewport, this.doc);
+    if (nav?.error) { this.toast('Entity navigation: ' + nav.error); return; }
+    if (nav) { this._navApplying = true; try { this.doc.apply([{ o: 'cfg', k: 'settings', patch: { nav } }], { record: false }); } finally { this._navApplying = false; } console.log(`nav baked: ${nav.w}x${nav.h} cells, ${nav.walkable} walkable, ${Math.round(performance.now() - t0)} ms`); }
+  }
   async save(saveAs) {
+    this.updateNav();
     const p = await api.file.save({ path: this.filePath, text: this.doc.serialize(), name: this.doc.map.meta.name, saveAs });
     if (!p) return null;
     this.filePath = p; this.doc.dirty = false; localStorage.removeItem('etbr.autosave');
@@ -676,6 +690,7 @@ class App {
 
   // ================================================================ test in the real game (live)
   async playInGame() {
+    this.updateNav();
     const name = (this.doc.map.meta.name || 'MyLevel').replace(/[^\w-]/g, '_');
     const inst = await api.game.installMap({ text: this.doc.serialize(), name }); // offline copy too
     if (!inst.ok) return this.modal('Can\'t test yet', `<p>${esc(inst.error)}</p><p>Run <b>ETBR-Mapper-Setup.exe</b> (the installer) once — it adds the loader mod to Escape the Backrooms.</p>`);
