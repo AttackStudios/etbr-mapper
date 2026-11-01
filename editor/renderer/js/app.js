@@ -358,6 +358,8 @@ class App {
       wall,
       // the exact lamp actor Level 0 uses (fixture + its real light); falls back to the bare mesh
       light: this.catalog.items.find((i) => i.kind === 'actor' && /\/BP_Ceiling_2Light\.BP_Ceiling_2Light_C$/.test(i.id) && i.levels?.includes('Level0'))?.id || find(/SM_Ceiling_Light/),
+      // Level 0's real light: this blueprint carries the two 125-lumen spot lights (the fixture above is just the mesh)
+      lightActor: this.catalog.items.find((i) => i.kind === 'actor' && /\/BP_Ceiling_2Light_2_level0\.BP_Ceiling_2Light_2_level0_C$/.test(i.id))?.id || null,
       pointLight: false, lightEvery: 2, cell: 400, ceilingRoll: 180,
       height: wi?.bounds ? Math.round(wi.bounds.e[2] * 2) : 400,
     };

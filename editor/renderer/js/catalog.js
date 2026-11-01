@@ -164,6 +164,7 @@ export class Catalog {
     }
     if (item.cat === 'entities') return placeholder(item.name, '#ff5577', 1.8, true);
     if (item.cat === 'items') return placeholder(item.name, '#ffd166', 0.3);
+    if (item.cat === 'lights') { const g = lightGizmo('spotlight'); g.rotation.z = -Math.PI / 2; g.traverse((o) => (o.userData.placeholder = true)); return g; } // light-only blueprints (e.g. Level 0 lamps)
     return placeholder(item.name, '#8ab4ff', 1);
   }
 }

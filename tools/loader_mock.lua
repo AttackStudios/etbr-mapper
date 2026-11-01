@@ -19,7 +19,10 @@ local gs = { IsValid = function() return true end,
   FinishSpawningActor = function() end,
   GetPlayerController = function() return nil end }
 local pawnLoc = { X = 0, Y = 0, Z = 0 }
-local pc = { IsValid = function() return true end, Pawn = { IsValid = function() return true end, K2_GetActorLocation = function() return pawnLoc end, K2_TeleportTo = function(_, l) pawnLoc = l end },
+local worldN = 1
+local world = { IsValid = function() return true end, GetFullName = function() return 'World /Game/Mock' .. worldN end, GetAddress = function() return worldN end,
+  SpawnActor = function(_, cls, loc) local a = newActor(cls, loc); spawned[#spawned + 1] = a; return a end }
+local pc = { IsValid = function() return true end, GetWorld = function() return world end, Pawn = { IsValid = function() return true end, K2_GetActorLocation = function() return pawnLoc end, K2_TeleportTo = function(_, l) pawnLoc = l end },
   GetControlRotation = function() return { Yaw = 0 } end, SetControlRotation = function() end, GetFullName = function() return 'PC0' end }
 local objs = setmetatable({}, { __index = function(t, k) local o = { IsValid = function() return true end, name = k }; t[k] = o; return o end })
 StaticFindObject = function(p) if p:find('GameplayStatics') then return gs end; if p:find('Missing') then return nil end; return objs[p] end
@@ -93,3 +96,27 @@ print(('live: spawned %d, destroyed %d (expect spawned 2, destroyed 1)'):format(
 print(('w2 moved to X=%.0f (expect 800)'):format(spawned[#spawned].loc.X))
 print('poll URL sample: ' .. (urls[3] or ''):sub(1, 150))
 os.remove('loader/ETBRLoader/live.json')
+
+
+print('--- WORLD CHANGE (level travel)')
+etbr('live', 'off')
+local f2 = real_open('loader/ETBRLoader/maps/MockTest.etbrmap', 'w')
+f2:write([[{"format":"etbrmap","version":1,"meta":{"name":"Mock2"},"settings":{"spawn":{"pos":[0,0,100],"yaw":0},"offset":[0,0,200000],
+ "spawnGroups":{"G":{"entity":"/Game/Entity/Hound/BP_Hound.BP_Hound_C","min":1,"max":1,"maxAlive":5,"startDelay":0}}},
+ "objects":[{"id":"o1","asset":"/Game/A.A","kind":"mesh","pos":[0,0,0],"rot":[0,0,0],"scale":[1,1,1]}],
+ "logic":[{"id":"a1","type":"entityspawn","group":"G","pos":[0,0,0],"size":[400,400,250]}]}]])
+f2:close()
+etbr('load', 'MockTest'); runLoops(3)
+for _ = 1, 20 do runLoops(1) end
+local oldActors = {}
+for _, a in ipairs(spawned) do if a.valid then oldActors[#oldActors + 1] = a end end
+-- travel: new world; Unreal frees the old actors — any method call on them must not happen
+for _, a in ipairs(oldActors) do setmetatable(a, { __index = function() error('TOUCHED A DEAD ACTOR') end }) end
+worldN = 2
+local s1 = #spawned
+local ok, err = pcall(function() for _ = 1, 20 do runLoops(1) end end)
+print('ticks after travel ok: ' .. tostring(ok) .. ' ' .. tostring(err or ''))
+print(('spawns after travel without reloading: %d (expect 0)'):format(#spawned - s1))
+ok, err = pcall(function() etbr('load', 'MockTest'); runLoops(3) end)
+print('reload in new world ok: ' .. tostring(ok) .. ' ' .. tostring(err or ''))
+os.remove('loader/ETBRLoader/maps/MockTest.etbrmap')

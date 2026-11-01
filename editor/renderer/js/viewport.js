@@ -549,7 +549,8 @@ export class Viewport extends EventTarget {
       if (kit.ceiling) add(kit.ceiling, cx, y + H, cz, 0, {}, kit.ceilingRoll ?? 180);
       if (kit.light && kit.lightEvery && (i % kit.lightEvery === 0) && (j % kit.lightEvery === 0)) {
         const li = this.catalog.get(kit.light);
-        if (li?.kind === 'actor') add(kit.light, cx, y + H, cz); // game lamp blueprint: brings its own real light
+        if (li?.kind === 'actor') add(kit.light, cx, y + H, cz); // game lamp fixture blueprint
+        if (kit.lightActor) add(kit.lightActor, cx, y + H, cz);   // + Level 0's spot lights, exactly like the game
         else add(kit.light, cx, y + H - this._thick(kit.light) - 0.005, cz);
         if (kit.pointLight && li?.kind !== 'actor') ops.push({ o: 'add', c: 'objects', item: { id: newId('o'), asset: '/Script/Engine.PointLight', kind: 'actor', pos: threeToUePos(new THREE.Vector3(cx, y + H - 0.3, cz)), rot: [0, 0, 0], scale: [1, 1, 1], layer: this.app.activeLayer || 'Default', props: { intensity: 2500, color: '#fff3c4', radius: 900 } } });
       }

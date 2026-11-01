@@ -42,7 +42,13 @@ local function ksl()
   if not KSL or not KSL:IsValid() then KSL = StaticFindObject('/Script/Engine.Default__KismetSystemLibrary') end
   return KSL
 end
+-- local player the same way the ETB community mods do (correct in co-op, unlike FindFirstOf)
+local okHelpers, UEHelpers = pcall(require, 'UEHelpers')
 local function localPC()
+  if okHelpers then
+    local ok, pc = pcall(function() return UEHelpers.GetGameInstance().LocalPlayers[1].PlayerController end)
+    if ok and pc and pc:IsValid() then return pc end
+  end
   local ok, pc = pcall(function() return statics():GetPlayerController(FindFirstOf('GameStateBase') or FindFirstOf('World'), 0) end)
   if ok and pc and pc:IsValid() then return pc end
   return FindFirstOf('PlayerController')
@@ -71,11 +77,20 @@ local function findObj(cache, path)
   return a
 end
 
+-- UE4SS's own UWorld:SpawnActor wrapper (calling BeginDeferredActorSpawnFromClass from Lua with a nil
+-- owner crashed the game with an access violation — found in the first real in-game test)
+local function currentWorld()
+  local pc = localPC()
+  local ok, w = pcall(function() return pc:GetWorld() end)
+  if ok and w and w:IsValid() then return w end
+  return FindFirstOf('World')
+end
 local function spawn(cls, loc)
-  local t = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = loc, Scale3D = vec(1, 1, 1) }
-  local a = statics():BeginDeferredActorSpawnFromClass(worldCtx(), cls, t, 1, nil)
+  if not cls then return nil end
+  local world = currentWorld()
+  if not world or not world:IsValid() then return nil end
+  local a = world:SpawnActor(cls, loc, { Pitch = 0, Yaw = 0, Roll = 0 })
   if not a or not a:IsValid() then return nil end
-  statics():FinishSpawningActor(a, t)
   return a
 end
 
@@ -94,6 +109,32 @@ end
 
 local SMA_CLASS = '/Script/Engine.StaticMeshActor'
 local TEXT_CLASS = '/Script/Engine.TextRenderActor'
+
+-- Lights spawned at runtime must be Movable: Static/Stationary lights rely on baked lighting and render
+-- nothing when spawned in a running game (found in-game: a built Level 0 room was pitch black).
+local function componentsOf(a, cls)
+  local out = {}
+  local arr = a:K2_GetComponentsByClass(cls)
+  if type(arr) == 'table' then
+    for i = 1, #arr do local c = arr[i]; if type(c) ~= 'nil' and c.get then c = c:get() end; out[#out + 1] = c end
+  elseif arr and arr.ForEach then
+    arr:ForEach(function(_, c) out[#out + 1] = c:get() end)
+  end
+  return out
+end
+local LIGHT_CLASS
+local function makeLightsDynamic(a)
+  if not LIGHT_CLASS or not LIGHT_CLASS:IsValid() then LIGHT_CLASS = StaticFindObject('/Script/Engine.LightComponent') end
+  if not LIGHT_CLASS then return 0 end
+  local n = 0
+  pcall(function()
+    -- this UE4SS build returns a plain Lua table here (not a TArray with :ForEach)
+    for _, c in ipairs(componentsOf(a, LIGHT_CLASS)) do
+      pcall(function() c:SetMobility(2); n = n + 1 end)
+    end
+  end)
+  return n
+end
 
 local function applyProps(a, o)
   local p = o.props or {}
@@ -135,6 +176,7 @@ local function spawnObject(o)
     if not isHost() and a.bReplicates then a:K2_DestroyActor(); return nil, 'host-only' end
   end
   place(a, o); applyProps(a, o)
+  if o.kind ~= 'mesh' then makeLightsDynamic(a) end
   return a
 end
 
@@ -168,9 +210,49 @@ local function startLogic()
 end
 
 -- build a map table (from a file or the live server). Spawns in batches.
+local function worldName()
+  local ok, n = pcall(function() return currentWorld():GetFullName() end)
+  return ok and n or ''
+end
+local function worldId()
+  local ok, id = pcall(function() local w = currentWorld(); return w:GetFullName() .. '@' .. tostring(w:GetAddress()) end)
+  return ok and id or ''
+end
+local popups = {}
+-- The world changed under us (level travel / "open"): Unreal already destroyed our actors, so drop the
+-- references WITHOUT touching them (touching dead actors crashed the game in the first in-game test).
+local function forgetWorld(reason)
+  -- assets we resolved earlier may have been garbage-collected during travel: re-resolve everything
+  -- (a stale cached StaticMesh crashed the game when building inside Level 0)
+  for k in pairs(classCache) do classCache[k] = nil end
+  for k in pairs(assetCache) do assetCache[k] = nil end
+  GS, KSL = nil, nil
+  state.byId, state.spawnedEntities, state.spawners = {}, {}, {}
+  state.triggered, state.checkpoints, state.loading = {}, {}, false
+  popups = {}
+  state.worldId = nil
+  if state.live then
+    state.live.rev = -1; state.live.started = false
+    log('level changed — rebuilding the live level in the new world…')
+  else
+    state.map = nil
+    log('level changed (' .. tostring(reason) .. ') — custom level removed; load it again here if you want it')
+  end
+end
+local function checkWorld()
+  if state.worldId and worldId() ~= state.worldId then forgetWorld(worldName()); return false end
+  return true
+end
 local function buildMap(map, label, out, onDone)
   if state.loading then return say(out, 'already loading…') end
+  if worldName():find('SplashScreen') then return say(out, 'the game is still starting — wait for the main menu or a level, then try again') end
+  checkWorld()
+  if state.worldId ~= worldId() then
+    for k in pairs(classCache) do classCache[k] = nil end
+    for k in pairs(assetCache) do assetCache[k] = nil end
+  end
   unload(false, true)
+  state.worldId = worldId()
   state.map, state.name, state.loading = map, label, true
   state.offset = (map.settings or {}).offset or cfg.defaultOffset
   local objs = map.objects or {}
@@ -247,7 +329,9 @@ local function spawnPoint(i)
   return W({ p[1] + dx, p[2] + dy, p[3] }), { Pitch = 0, Yaw = sp.yaw or 0, Roll = 0 }
 end
 local function teleport(pp, loc, rot)
-  pcall(function() pp.pawn:K2_TeleportTo(loc, rot) end)
+  -- proven in ETBCommandsMod setpos: sweep off, teleport physics on
+  local ok = pcall(function() pp.pawn:K2_SetActorLocation(loc, false, {}, true) end)
+  if not ok then pcall(function() pp.pawn:K2_TeleportTo(loc, rot) end) end
   pcall(function() pp.pc:SetControlRotation(rot) end)
 end
 local function start(out)
@@ -267,7 +351,6 @@ local function inside(p, l)
   local c, s = W(l.pos), l.size or { 200, 200, 200 }
   return math.abs(p.X - c.X) <= s[1] / 2 and math.abs(p.Y - c.Y) <= s[2] / 2 and math.abs(p.Z - c.Z) <= s[3] / 2
 end
-local popups = {}
 local function popup(pc, text)
   local pawn = pc.Pawn; if not pawn or not pawn:IsValid() then return end
   local loc = pawn:K2_GetActorLocation()
@@ -327,6 +410,7 @@ function logicTick()
     end
   end
   if not state.map or state.loading then return end
+  if not checkWorld() then return end
   local host = isHost()
   local me = localPC()
   local now = os.clock()
@@ -438,7 +522,7 @@ local function liveTick()
     end)
   elseif res.ops and #res.ops > 0 then
     L.rev = res.rev
-    ExecuteInGameThread(function() pcall(applyOps, res.ops) end)
+    ExecuteInGameThread(function() if checkWorld() then pcall(applyOps, res.ops) end end)
   else
     L.rev = res.rev or L.rev
   end
@@ -494,7 +578,7 @@ local function handle(args, out)
       local pc = localPC()
       if state.map and pc and pc.Pawn then local l, r = spawnPoint(0); teleport({ pc = pc, pawn = pc.Pawn }, l, r) end
     end)
-  elseif sub == 'unload' then ExecuteInGameThread(function() unload(out) end)
+  elseif sub == 'unload' then ExecuteInGameThread(function() checkWorld(); unload(out) end)
   elseif sub == 'fetch' then fetch(args[2], out)
   elseif sub == 'lowfx' then lowfx(args[2] ~= 'off', out)
   elseif sub == 'list' then
@@ -532,5 +616,91 @@ pcall(function()
     if state.live then state.live.rev = -1; state.live.started = false else state.map = nil end
   end) end
 end)
+
+-- Developer remote control: ONLY active if a "dev.enable" file sits next to the mod (never shipped).
+-- Lines written to devcmd.txt run as console commands: "etbr ..." or any Unreal console command after "ue ".
+if readFile(MOD_DIR .. 'dev.enable') then
+  log('dev command channel enabled (devcmd.txt)')
+  LoopAsync(500, function()
+    local txt = readFile(MOD_DIR .. 'devcmd.txt')
+    if txt and #txt > 0 then
+      os.remove(MOD_DIR .. 'devcmd.txt')
+      for line in txt:gmatch('[^\r\n]+') do
+        log('dev> ' .. line)
+        local words = {}
+        for w in line:gmatch('%S+') do words[#words + 1] = w end
+        if words[1] == 'etbr' then table.remove(words, 1); pcall(handle, words, nil)
+        elseif words[1] == 'ue' then local c = line:sub(4); ExecuteInGameThread(function() console(c) end)
+        elseif words[1] == 'hideui' then
+          ExecuteInGameThread(function()
+            pcall(function() StaticFindObject('/Script/UMG.Default__WidgetBlueprintLibrary'):RemoveAllWidgets(currentWorld()) end)
+            pcall(function() local pc = localPC(); pc.bShowMouseCursor = false; StaticFindObject('/Script/UMG.Default__WidgetBlueprintLibrary'):SetInputMode_GameOnly(pc) end)
+            log('dev: widgets removed')
+          end)
+        elseif words[1] == 'tpto' then -- tpto x y z (world cm)
+          ExecuteInGameThread(function()
+            local pc = localPC()
+            pcall(function() pc.Pawn:K2_SetActorLocation(vec(tonumber(words[2]), tonumber(words[3]), tonumber(words[4])), false, {}, true) end)
+          end)
+        elseif words[1] == 'comps' then -- comps <asset substring>: list components of the first matching spawned actor
+          ExecuteInGameThread(function()
+            local want = words[2] or 'level0'
+            for id, a in pairs(state.byId) do
+              local ok, nm = pcall(function() return a:GetFullName() end)
+              if ok and nm:find(want) then
+                log('comps of ' .. nm:sub(1, 120))
+                local AC = StaticFindObject('/Script/Engine.ActorComponent')
+                local n = 0
+                local ok1, e1 = pcall(function()
+                  local arr = a:K2_GetComponentsByClass(AC)
+                  log('  array type: ' .. type(arr) .. ' len=' .. tostring(#arr))
+                  for i = 1, #arr do
+                    local c = arr[i]; if c.get then c = c:get() end
+                    n = n + 1
+                    local cls = '?'; pcall(function() cls = c:GetClass():GetFName():ToString() end)
+                    log(('  [%d] %s  %s'):format(i, cls, c:GetFName():ToString()))
+                  end
+                end)
+                if not ok1 then log('  error: ' .. tostring(e1)) end
+                log('  total ' .. n)
+                break
+              end
+            end
+          end)
+        elseif words[1] == 'lightinfo' then
+          ExecuteInGameThread(function()
+            if not LIGHT_CLASS then LIGHT_CLASS = StaticFindObject('/Script/Engine.LightComponent') end
+            local total, on = 0, 0
+            for id, a in pairs(state.byId) do
+              pcall(function()
+                for _, lc in ipairs(componentsOf(a, LIGHT_CLASS)) do
+                  total = total + 1
+                  local vis, mob, inten = '?', '?', '?'
+                  pcall(function() vis = tostring(lc:IsVisible()) end)
+                  pcall(function() mob = tostring(lc.Mobility) end)
+                  pcall(function() inten = tostring(lc.Intensity) end)
+                  if vis == 'true' then on = on + 1 end
+                  if total <= 4 then log(('  light %s vis=%s mobility=%s intensity=%s'):format(lc:GetFullName():sub(1, 90), vis, mob, inten)) end
+                end
+              end)
+            end
+            log(('lightinfo: %d light components, %d visible'):format(total, on))
+          end)
+        elseif words[1] == 'look' then -- look pitch yaw
+          ExecuteInGameThread(function() pcall(function() localPC():SetControlRotation({ Pitch = tonumber(words[2]) or 0, Yaw = tonumber(words[3]) or 0, Roll = 0 }) end) end)
+        elseif words[1] == 'state' then
+          ExecuteInGameThread(function()
+            local n = 0; for _ in pairs(state.byId) do n = n + 1 end
+            local pc = localPC(); local where = '?'
+            pcall(function() local p = pc.Pawn:K2_GetActorLocation(); where = ('%.0f %.0f %.0f'):format(p.X, p.Y, p.Z) end)
+            local w = '?'; pcall(function() w = pc:GetWorld():GetFullName() end)
+            log(('state: map=%s actors=%d live=%s rev=%s pawn=%s world=%s'):format(tostring(state.map and state.map.meta and state.map.meta.name), n, tostring(state.live and state.live.room), tostring(state.live and state.live.rev), where, w))
+          end)
+        end
+      end
+    end
+    return false
+  end)
+end
 
 log('ETBR Loader ' .. VERSION .. ' ready — maps folder: ' .. MAPS_DIR)
