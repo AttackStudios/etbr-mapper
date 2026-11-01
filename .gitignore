@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+.env
+extractor/bin/
+extractor/obj/
+catalog-cache/
