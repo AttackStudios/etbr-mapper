@@ -163,6 +163,22 @@ ipcMain.handle('game:installMap', (_e, { text, name }) => {
   fs.writeFileSync(path.join(dir, file), text);
   return { ok: true, file, command: 'etbr load ' + file.replace(/\.etbrmap$/, '') };
 });
+// Live test: tell the in-game loader which collab room to follow (F7 in game picks it up)
+ipcMain.handle('game:writeLive', (_e, live) => {
+  const gameDir = detectGame();
+  if (!gameDir) return { ok: false, error: 'Game folder not found' };
+  const loader = path.join(gameDir, ...LOADER_REL);
+  if (!fs.existsSync(loader)) return { ok: false, error: 'The ETBR loader mod is not installed — run ETBR-Mapper-Setup.exe first.' };
+  fs.writeFileSync(path.join(loader, 'live.json'), JSON.stringify({ ...live, written: new Date().toISOString() }, null, 1));
+  return { ok: true };
+});
+ipcMain.handle('game:launch', async () => {
+  const running = await new Promise((res) => {
+    require('child_process').exec('tasklist /FI "IMAGENAME eq Backrooms-Win64-Shipping.exe" /NH', (err, out) => res(!err && /Backrooms-Win64-Shipping/i.test(out || '')));
+  });
+  if (!running) await shell.openExternal('steam://rungameid/1943950');
+  return { running };
+});
 ipcMain.handle('shell:open', (_e, url) => shell.openExternal(url));
 ipcMain.handle('shell:showItem', (_e, p) => shell.showItemInFolder(p));
 ipcMain.handle('app:quit', () => { win.__forceClose = true; win.close(); });

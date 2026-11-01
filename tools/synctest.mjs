@@ -1,0 +1,28 @@
+// Tests the in-game live-link endpoint: node tools/synctest.mjs [baseUrl]
+import { createRequire } from 'module';
+const require = createRequire(new URL('../server/index.js', import.meta.url));
+const WebSocket = require('ws');
+const BASE = process.argv[2] || 'http://localhost:8799';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const ws = new WebSocket(BASE.replace(/^http/, 'ws') + '/ws');
+const q = []; ws.on('message', (m) => q.push(JSON.parse(m)));
+await new Promise((r) => ws.on('open', r));
+ws.send(JSON.stringify({ t: 'create', name: 'Editor', color: '#ff0000' }));
+while (!q.find((x) => x.t === 'welcome')) await sleep(20);
+const room = q.find((x) => x.t === 'welcome').room;
+const sync = async (since, extra = '') => (await fetch(`${BASE}/api/room/${room}/sync?since=${since}${extra}`)).json();
+let r = await sync(-1);
+console.log('first poll: full map?', !!r.map, 'rev', r.rev);
+ws.send(JSON.stringify({ t: 'op', ops: [{ o: 'add', c: 'objects', item: { id: 'a1', asset: '/Game/X', kind: 'mesh', pos: [0, 0, 0], rot: [0, 0, 0], scale: [1, 1, 1] } }] }));
+ws.send(JSON.stringify({ t: 'op', live: true, ops: [{ o: 'set', c: 'objects', id: 'a1', patch: { pos: [50, 0, 0] } }] }));
+ws.send(JSON.stringify({ t: 'op', ops: [{ o: 'set', c: 'objects', id: 'a1', patch: { pos: [100, 0, 0] } }] }));
+await sleep(300);
+const r2 = await sync(r.rev, '&name=Jack&color=%23f2d45c&p=10,20,300&yaw=90&cr=0');
+console.log('delta poll:', r2.ops?.map((o) => o.o + (o.patch ? JSON.stringify(o.patch) : '')).join(' | '), 'rev', r2.rev);
+const r3 = await sync(r2.rev);
+console.log('no-change poll ops:', r3.ops?.length);
+await sleep(200);
+console.log('editor got test+pose:', !!q.find((x) => x.t === 'test' && x.on), JSON.stringify(q.find((x) => x.t === 'pose')));
+console.log('waiting for timeout (7s)…'); await sleep(8000);
+console.log('editor got test off:', !!q.find((x) => x.t === 'test' && x.on === false));
+ws.close(); process.exit(0);

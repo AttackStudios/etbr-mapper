@@ -5,7 +5,7 @@ export class Collab extends EventTarget {
   constructor(app) {
     super();
     this.app = app; this.doc = app.doc; this.vp = app.viewport;
-    this.ws = null; this.room = null; this.you = null; this.users = new Map();
+    this.ws = null; this.room = null; this.you = null; this.users = new Map(); this.gamePlayers = new Map();
     this.pending = [];
     this.lastCursor = 0;
     this.wantRoom = null;
@@ -47,6 +47,7 @@ export class Collab extends EventTarget {
     // adopt the room's map (for joiners; for the creator it's identical)
     this.doc.load(msg.map);
     for (const u of msg.users) if (u.id !== this.you && u.sel?.length) this.vp.setRemoteSelection(u.id, u, u.sel);
+    for (const u of msg.users) if (u.id !== this.you && u.testing) this.vp.setRemoteTesting(u.id, u, true);
     this.doc.sendHook = (ops) => this._send({ t: 'op', ops });
     this.app.settings.lastRoom = msg.room; window.etbr.settings.set({ lastRoom: msg.room });
     this.dispatchEvent(new Event('change'));
@@ -79,6 +80,12 @@ export class Collab extends EventTarget {
     this.lastCursor = now; this._send({ t: 'cursor', p: [+p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2)] });
   }
   sendSelection(ids) { if (this.connected) this._send({ t: 'select', ids }); }
+  sendPose(pose) {
+    const now = performance.now();
+    if (!this.connected || now - (this.lastPose || 0) < 66) return;
+    this.lastPose = now; this._send({ t: 'pose', ...pose });
+  }
+  sendTest(on) { if (this.connected) this._send({ t: 'test', on }); }
   chat(text) { if (this.connected && text.trim()) this._send({ t: 'chat', text }); }
 
   _msg(msg) {
@@ -90,6 +97,20 @@ export class Collab extends EventTarget {
       case 'cursor': { const u = this.users.get(msg.id); if (u) this.vp.setRemoteCursor(msg.id, u, msg.p); break; }
       case 'select': { const u = this.users.get(msg.id); if (u) { u.sel = msg.ids; this.vp.setRemoteSelection(msg.id, u, msg.ids); } break; }
       case 'chat': this.dispatchEvent(new CustomEvent('chat', { detail: msg })); break;
+      case 'pose': {
+        // players in the real game report Unreal coords (map-local cm, capsule centre) + yaw in degrees
+        const u = this.users.get(msg.id) || msg.user; if (!u) break;
+        let pose = msg;
+        if (msg.ue) pose = { p: [msg.p[0] / 100, (msg.p[2] - 88) / 100, msg.p[1] / 100], yaw: -msg.yaw * Math.PI / 180 - Math.PI / 2, cr: msg.cr, fl: 0 };
+        this.vp.setRemotePose(msg.id, u, pose);
+        break;
+      }
+      case 'test': {
+        const u = this.users.get(msg.id) || msg.user;
+        if (msg.user) { msg.on ? this.gamePlayers.set(msg.id, msg.user) : this.gamePlayers.delete(msg.id); }
+        if (u) { this.vp.setRemoteTesting(msg.id, u, msg.on); this.app.toast(msg.on ? `🎮 ${u.name} is testing in the game` : `${u.name} left the game test`); this.dispatchEvent(new Event('change')); }
+        break;
+      }
     }
   }
   async _resync() {

@@ -6,5 +6,6 @@ return {
   keyUnload = 'F8',    -- remove custom level
   batchSize = 120,     -- objects spawned per tick (lower = smoother, slower)
   batchDelayMs = 30,
+  livePollMs = 250,    -- live test: how often to check for edits (ms)
   defaultOffset = { 0, 0, 200000 }, -- levels are built 2 km above the current map
 }

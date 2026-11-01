@@ -35,6 +35,7 @@ export const LOGIC_TYPES = [
   { type: 'checkpoint', name: 'Checkpoint', color: '#facc15', desc: 'Respawn here after falling / dying.' },
   { type: 'message', name: 'Message Zone', color: '#c084fc', desc: 'Shows floating text when a player walks in.' },
   { type: 'teleport', name: 'Teleporter', color: '#38bdf8', desc: 'Moves the player to a target point.' },
+  { type: 'entityspawn', name: 'Entity Spawn Area', color: '#ff5577', desc: 'An entity appears in one of a group\'s areas at a random time (e.g. every 20–50 s).' },
 ];
 
 export const CATEGORIES = [
@@ -87,7 +88,11 @@ export class Catalog {
   texture(rel) {
     if (!rel) return null;
     if (this.texCache.has(rel)) return this.texCache.get(rel);
-    const t = this.texLoader.load(LIB + rel);
+    let done;
+    const p = new Promise((r) => (done = r));
+    this.texPending = this.texPending || new Set();
+    this.texPending.add(p);
+    const t = this.texLoader.load(LIB + rel, () => { done(); this.texPending.delete(p); }, undefined, () => { done(); this.texPending.delete(p); });
     t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4;
     this.texCache.set(rel, t);
     return t;
@@ -193,6 +198,7 @@ export function placeholder(name, color, h, humanoid) {
     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(box.geometry), new THREE.LineBasicMaterial({ color: '#ffffff' }));
     edges.position.copy(box.position); g.add(edges);
   }
+  g.traverse((o) => { o.userData.placeholder = true; });
   const l = labelSprite(name, color); l.position.y = h + 0.35; g.add(l);
   return g;
 }
@@ -252,6 +258,7 @@ export class Thumbnailer {
       try {
         const obj = await this.catalog.instantiate(item);
         obj.traverse((o) => { if (o.userData?.isLabel) o.visible = false; });
+        if (this.catalog.texPending?.size) await Promise.race([Promise.all([...this.catalog.texPending]), new Promise((r) => setTimeout(r, 3000))]);
         this.scene.add(obj);
         const box = new THREE.Box3().setFromObject(obj);
         const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());

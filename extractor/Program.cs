@@ -47,7 +47,7 @@ static class P
         {
             "scan" => Scan(prov, a[2]),
             "library" => Library(prov, a[1], a[2], a.Contains("--force"), a.SkipWhile(x => x != "--only").Skip(1).FirstOrDefault()),
-            "probe" => Probe(prov, a[3]),
+            "probe" => Probe(prov, a[3], a.Length > 4 ? a[4] : null),
             _ => 1,
         };
     }
@@ -381,13 +381,14 @@ static class P
     }
 
     // ------------------------------------------------------------------ probe
-    static int Probe(DefaultFileProvider prov, string asset)
+    static int Probe(DefaultFileProvider prov, string asset, string filter = null)
     {
         var pkg = prov.LoadPackage(asset);
         foreach (var e in pkg.GetExports())
         {
+            if (filter != null && !(e.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) || (e.ExportType ?? "").Contains(filter, StringComparison.OrdinalIgnoreCase))) continue;
             Console.WriteLine($"== {e.ExportType} {e.Name}");
-            try { var s = Newtonsoft.Json.JsonConvert.SerializeObject(e, Newtonsoft.Json.Formatting.Indented); Console.WriteLine(s.Length > 3000 ? s[..3000] + "…" : s); } catch (Exception ex) { Console.WriteLine("  (json fail " + ex.Message + ")"); }
+            try { var s = Newtonsoft.Json.JsonConvert.SerializeObject(e, Newtonsoft.Json.Formatting.Indented); Console.WriteLine(filter == null && s.Length > 3000 ? s[..3000] + "…" : s); } catch (Exception ex) { Console.WriteLine("  (json fail " + ex.Message + ")"); }
         }
         if (pkg is Package p) foreach (var i in p.ImportMap.Take(40)) Console.WriteLine($"  imp {i.ClassName} {i.ObjectName} outer={i.OuterIndex.Index}");
         return 0;

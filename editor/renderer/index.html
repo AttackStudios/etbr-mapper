@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ETBR Mapper</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' etbrlib: data: blob:; img-src 'self' etbrlib: data: blob:; connect-src 'self' etbrlib: https: wss: data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-iDWQetb5GYyuwmSzsD+1wj6x3FuZFb+JIvwrtNMCZD8='" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">
+    { "imports": { "three": "../node_modules/three/build/three.module.js", "three/addons/": "../node_modules/three/examples/jsm/" } }
+  </script>
+</head>
+<body>
+  <!-- ============ boot / start ============ -->
+  <section id="boot" class="screen">
+    <div class="boot-card">
+      <div class="logo"><span class="logo-mark">▚</span> ETBR <b>Mapper</b></div>
+      <p class="tag">Build your own Escape the Backrooms levels — together.</p>
+
+      <div id="boot-library" hidden>
+        <h3>First time setup</h3>
+        <p class="muted">ETBR Mapper builds its object library from <b>your own copy</b> of Escape the Backrooms. This takes a few minutes, once.</p>
+        <div class="gamepath"><span id="game-path">Looking for the game…</span><button id="btn-pick-game" class="ghost small">Change…</button></div>
+        <button id="btn-build-lib" class="primary big">Build object library</button>
+        <div id="lib-progress" hidden>
+          <div class="bar"><i></i></div>
+          <div class="muted small" id="lib-progress-label">Starting…</div>
+        </div>
+      </div>
+
+      <div id="boot-start" hidden>
+        <div class="start-grid">
+          <button class="start-tile" id="st-new"><span>✨</span><b>New level</b><small>Start from an empty void</small></button>
+          <button class="start-tile" id="st-open"><span>📂</span><b>Open .etbrmap</b><small>Continue a saved level</small></button>
+          <button class="start-tile" id="st-join"><span>🤝</span><b>Join a friend</b><small>Enter their 6-letter room code</small></button>
+        </div>
+        <div id="recent" class="recent"></div>
+        <div class="who">
+          <label>Your name <input id="st-name" maxlength="24" placeholder="Builder" /></label>
+          <label>Colour <input id="st-color" type="color" value="#f2d45c" /></label>
+        </div>
+      </div>
+      <p class="credit">by AttackStudioYT · not affiliated with Fancy Games</p>
+    </div>
+  </section>
+
+  <!-- ============ editor ============ -->
+  <section id="app" class="screen" hidden>
+    <header id="topbar">
+      <div class="logo small"><span class="logo-mark">▚</span> ETBR <b>Mapper</b></div>
+      <input id="level-name" class="level-name" title="Level name" />
+      <div class="tb-group">
+        <button data-act="new" title="New level (Ctrl+N)">New</button>
+        <button data-act="open" title="Open (Ctrl+O)">Open</button>
+        <button data-act="save" title="Save (Ctrl+S)">Save</button>
+        <button data-act="export" class="accent-outline" title="Export as .etbrmap (Ctrl+Shift+S)">Export .etbrmap</button>
+      </div>
+      <div class="tb-group">
+        <button data-act="undo" title="Undo (Ctrl+Z)">↶</button>
+        <button data-act="redo" title="Redo (Ctrl+Y)">↷</button>
+      </div>
+      <div class="tb-group tools" id="tools">
+        <button data-tool="select" data-gizmo="translate" title="Move (W)" class="on">✥ Move</button>
+        <button data-tool="select" data-gizmo="rotate" title="Rotate (E)">⟳ Rotate</button>
+        <button data-tool="select" data-gizmo="scale" title="Scale (R)">⤢ Scale</button>
+        <button data-tool="room" title="Room builder (B)">▣ Room</button>
+      </div>
+      <div class="tb-group">
+        <label class="snap" title="Snapping (G)"><input type="checkbox" id="snap-on" checked /> Snap</label>
+        <select id="snap-grid" title="Grid size">
+          <option value="0.25">25 cm</option><option value="0.5">50 cm</option><option value="1" selected>1 m</option><option value="2">2 m</option><option value="4">4 m</option>
+        </select>
+        <button data-act="lighting" id="btn-lighting" title="Toggle preview lighting (L)">☀ Bright</button>
+      </div>
+      <div class="spacer"></div>
+      <div class="tb-group">
+        <button data-act="collab" id="btn-collab" class="collab-btn" title="Collaborate live">🤝 Collab</button>
+        <button data-act="play" class="primary" title="Test in the real game — edits show up live (Ctrl+P)">🎮 Test in game</button>
+        <button data-act="help" title="Help & shortcuts (?)">?</button>
+      </div>
+    </header>
+
+    <aside id="palette">
+      <div class="pal-search"><input id="pal-q" placeholder="Search 8 000+ objects…  (Ctrl+F)" /></div>
+      <nav id="pal-cats"></nav>
+      <div id="pal-groups"></div>
+      <div id="pal-grid" class="pal-grid"></div>
+      <div class="pal-hint" id="pal-hint">Click an object, then click in the world to place it. <b>R</b> rotates · <b>Esc</b> stops.</div>
+    </aside>
+
+    <main id="viewport-wrap">
+      <div id="viewport"></div>
+      <div id="mode-banner" hidden></div>
+      <div id="room-panel" class="floating" hidden></div>
+      <div id="statusbar">
+        <span id="st-objects">0 objects</span>
+        <span id="st-sel"></span>
+        <span id="st-cursor"></span>
+        <span class="spacer"></span>
+        <span id="st-collab"></span>
+        <span class="muted">Hold <b>Right mouse</b> + WASD to fly · <b>Wheel</b> zoom · <b>Middle</b> pan · <b>Alt+drag</b> orbit · <b>F</b> focus</span>
+      </div>
+    </main>
+
+    <aside id="sidebar">
+      <nav class="tabs" id="side-tabs">
+        <button data-tab="inspector" class="on">Inspector</button>
+        <button data-tab="outliner">Outliner</button>
+        <button data-tab="level">Level</button>
+        <button data-tab="people">People <span id="people-count"></span></button>
+      </nav>
+      <div class="tab-body" id="tab-inspector"></div>
+      <div class="tab-body" id="tab-outliner" hidden></div>
+      <div class="tab-body" id="tab-level" hidden></div>
+      <div class="tab-body" id="tab-people" hidden></div>
+    </aside>
+  </section>
+
+  <div id="modal-root"></div>
+  <div id="toasts"></div>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

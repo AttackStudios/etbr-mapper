@@ -4,6 +4,7 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { ueToThreePos, threeToUePos, ueRotToQuat, quatToUeRot, ueToThreeScale, threeToUeScale } from './coords.js';
 import { LOGIC_TYPES, textSign, placeholder } from './catalog.js';
 import { newId } from './doc.js';
+import { wandererAvatar } from './avatar.js';
 
 const ACCENT = '#f2d45c';
 const LOGIC_COLORS = Object.fromEntries(LOGIC_TYPES.map((t) => [t.type, t.color]));
@@ -58,7 +59,7 @@ export class Viewport extends EventTarget {
     const g4 = new THREE.GridHelper(400, 100, '#6b6240', '#4a4430'); g4.material.transparent = true; g4.material.opacity = 0.8;
     this.grid.add(g1, g4);
     const axX = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-200, 0.01, 0), new THREE.Vector3(200, 0.01, 0)]), new THREE.LineBasicMaterial({ color: '#c0503a' }));
-    const axZ = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.01, -200), new THREE.Vector3(0, 0.01, 200)]), new THREE.LineBasicMaterial({ color: '#3a7fc0' }));
+    const axZ = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.01, -200), new THREE.Vector3(0, 0.01, 200)]), new THREE.LineBasicMaterial({ color: '#4f9a3a' }));
     this.grid.add(axX, axZ);
     this.scene.add(this.grid);
 
@@ -423,6 +424,7 @@ export class Viewport extends EventTarget {
   _loop() {
     requestAnimationFrame(this._loop);
     const dt = Math.min(this.clock.getDelta(), 0.05);
+    this._animAvatars(dt);
     if (this.fly.active) {
       const k = this.keys, v = new THREE.Vector3();
       if (k.has('KeyW')) v.z -= 1; if (k.has('KeyS')) v.z += 1; if (k.has('KeyA')) v.x -= 1; if (k.has('KeyD')) v.x += 1;
@@ -490,7 +492,14 @@ export class Viewport extends EventTarget {
       if (this.placeLogic === 'message') base.text = 'Something is watching…';
       if (this.placeLogic === 'exit') base.text = 'You escaped!';
       if (this.placeLogic === 'teleport') base.to = [pos[0] + 400, pos[1], pos[2]];
-      this.doc.apply([{ o: 'add', c: 'logic', item: base }], { label: 'Add ' + this.placeLogic });
+      const ops = [{ o: 'add', c: 'logic', item: base }];
+      if (this.placeLogic === 'entityspawn') {
+        base.size = [400, 400, 250];
+        base.group = this.app.lastSpawnGroup || 'Group 1';
+        const groups = this.doc.map.settings.spawnGroups || {};
+        if (!groups[base.group]) ops.push({ o: 'cfg', k: 'settings', patch: { spawnGroups: { ...groups, [base.group]: this.app.defaultSpawnGroup() } } });
+      }
+      this.doc.apply(ops, { label: 'Add ' + this.placeLogic });
       if (!e.shiftKey) { this.app.setMode('select'); this.select([id]); }
       return;
     }
@@ -594,7 +603,38 @@ export class Viewport extends EventTarget {
     }
     c.target.set(p[0], p[1], p[2]);
   }
-  removeRemote(id) { const c = this.cursors.get(id); if (c) { this.overlay.remove(c.g); this.cursors.delete(id); } this.setRemoteSelection(id, null, []); }
+  removeRemote(id) { const c = this.cursors.get(id); if (c) { this.overlay.remove(c.g); this.cursors.delete(id); } this.setRemoteSelection(id, null, []); this.setRemoteTesting(id, null, false); }
+  // collaborators who are play-testing show up as walking Wanderer avatars
+  setRemoteTesting(id, user, on) {
+    this.avatars = this.avatars || new Map();
+    const a = this.avatars.get(id);
+    if (!on) { if (a) { this.scene.remove(a); this.avatars.delete(id); } return; }
+    if (!a && user) { const g = wandererAvatar(user.name, user.color); g.visible = false; this.scene.add(g); this.avatars.set(id, g); }
+    const c = this.cursors.get(id); if (c) c.g.visible = !on;
+  }
+  setRemotePose(id, user, pose) {
+    this.avatars = this.avatars || new Map();
+    if (!this.avatars.has(id)) this.setRemoteTesting(id, user, true);
+    const g = this.avatars.get(id); if (!g) return;
+    const u = g.userData;
+    u.target.set(pose.p[0], pose.p[1], pose.p[2]);
+    if (!g.visible) { g.position.copy(u.target); g.visible = true; }
+    u.yaw = pose.yaw; u.cr = pose.cr; u.beam.visible = !!pose.fl;
+  }
+  _animAvatars(dt) {
+    if (!this.avatars) return;
+    for (const g of this.avatars.values()) {
+      const u = g.userData;
+      const speed = g.position.distanceTo(u.target) / Math.max(dt, 1e-3);
+      g.position.lerp(u.target, Math.min(1, dt * 12));
+      g.rotation.y += (u.yaw - g.rotation.y) * Math.min(1, dt * 12);
+      u.t += dt * Math.min(speed, 6) * 2.2;
+      const sw = Math.sin(u.t) * Math.min(1, speed / 3) * 0.5;
+      const l1 = u.body.getObjectByName('leg-1'), l2 = u.body.getObjectByName('leg1');
+      if (l1) l1.rotation.x = sw; if (l2) l2.rotation.x = -sw;
+      u.body.scale.y = THREE.MathUtils.lerp(u.body.scale.y, u.cr ? 0.65 : 1, Math.min(1, dt * 10));
+    }
+  }
   setRemoteSelection(userId, user, ids) {
     for (const [oid, lk] of [...this.locks]) if (lk.userId === userId) { this.locks.delete(oid); const b = this.lockBoxes.get(oid); if (b) { this.overlay.remove(b); this.lockBoxes.delete(oid); } }
     for (const oid of ids) {

@@ -84,7 +84,7 @@ function newCode() {
   }
 }
 function makeRoom(code, map) {
-  const room = { code, map, rev: 0, users: new Map(), dirty: false, index: { objects: new Map(), logic: new Map() } };
+  const room = { code, map, rev: 0, users: new Map(), dirty: false, index: { objects: new Map(), logic: new Map() }, log: [], players: new Map() };
   reindex(room);
   rooms.set(code, room);
   return room;
@@ -107,7 +107,31 @@ function broadcast(room, msg, except) {
   const s = JSON.stringify(msg);
   for (const u of room.users.values()) if (u.ws !== except && u.ws.readyState === 1) u.ws.send(s);
 }
-function publicUser(u) { return { id: u.id, name: u.name, color: u.color, sel: u.sel }; }
+function publicUser(u) { return { id: u.id, name: u.name, color: u.color, sel: u.sel, testing: !!u.testing }; }
+
+// op log so the in-game loader can fetch just what changed since its last poll
+const LOG_MAX = 4000;
+function logOps(room, ops) {
+  room.logRev = (room.logRev || 0) + 1;
+  room.log.push({ rev: room.logRev, ops });
+  if (room.log.length > LOG_MAX) room.log.splice(0, room.log.length - LOG_MAX);
+}
+
+// players walking the level in the real game (reported by the loader over HTTP)
+function gamePlayerSeen(room, q) {
+  const name = String(q.get('name') || 'Player').slice(0, 24);
+  const id = 'g_' + name.replace(/[^\w-]/g, '_');
+  const color = /^#[0-9a-f]{6}$/i.test(q.get('color') || '') ? q.get('color') : '#4fd1ff';
+  let gp = room.players.get(id);
+  if (!gp) { gp = { id, name, color }; room.players.set(id, gp); broadcast(room, { t: 'test', id, on: true, user: { id, name, color } }); }
+  gp.seen = Date.now();
+  const p = (q.get('p') || '').split(',').map(Number);
+  if (p.length === 3 && p.every(Number.isFinite)) broadcast(room, { t: 'pose', id, ue: true, p, yaw: +q.get('yaw') || 0, cr: q.get('cr') === '1' ? 1 : 0, user: { id, name, color } });
+}
+setInterval(() => {
+  const now = Date.now();
+  for (const room of rooms.values()) for (const [id, gp] of room.players) if (now - gp.seen > 6000) { room.players.delete(id); broadcast(room, { t: 'test', id, on: false }); }
+}, 2000);
 
 // who has an item selected (soft lock)
 function lockedBy(room, id, me) {
@@ -150,6 +174,7 @@ function applyOp(room, op, user) {
     }
     case 'replace': {
       room.map = sanitizeMap(op.map); reindex(room);
+      room.resetAt = (room.logRev || 0) + 1; // loaders behind this point must reload the whole map
       return null;
     }
   }
@@ -174,6 +199,19 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify(room.map));
     }
     return json(res, 200, { code: room.code, name: room.map.meta.name, users: [...room.users.values()].map((u) => u.name), objects: room.map.objects.length });
+  }
+  // in-game live link: GET /api/room/CODE/sync?since=N&name=&color=&p=x,y,z&yaw=&cr=
+  if ((m = url.pathname.match(/^\/api\/room\/([A-Za-z0-9]{6})\/sync$/)) && req.method === 'GET') {
+    const room = await getRoom(m[1]);
+    if (!room) return json(res, 404, { error: 'no such room' });
+    if (url.searchParams.get('name')) gamePlayerSeen(room, url.searchParams);
+    const since = parseInt(url.searchParams.get('since') ?? '-1', 10);
+    const head = room.logRev || 0;
+    const oldest = room.log.length ? room.log[0].rev : head + 1;
+    if (since < 0 || since > head || since + 1 < oldest || (room.resetAt && since < room.resetAt)) return json(res, 200, { rev: head, map: room.map });
+    const ops = [];
+    for (const e of room.log) if (e.rev > since) ops.push(...e.ops);
+    return json(res, 200, { rev: head, ops });
   }
   if (url.pathname === '/api/share' && req.method === 'POST') {
     let body = '';
@@ -225,6 +263,7 @@ wss.on('connection', (ws) => {
         }
         if (ok.length) {
           room.rev++; room.dirty = true; room.map.meta.modified = new Date().toISOString();
+          if (!msg.live) logOps(room, ok);
           broadcast(room, { t: 'op', from: user.id, ops: ok, rev: room.rev }, ws);
           send({ t: 'ack', rev: room.rev, n: ok.length });
         }
@@ -243,6 +282,13 @@ wss.on('connection', (ws) => {
         if (text) broadcast(room, { t: 'chat', id: user.id, name: user.name, text, at: Date.now() });
         break;
       }
+      case 'pose': // play-test position of a collaborator walking the level
+        if (Array.isArray(msg.p)) broadcast(room, { t: 'pose', id: user.id, p: msg.p.slice(0, 3).map(Number), yaw: +msg.yaw || 0, pitch: +msg.pitch || 0, cr: msg.cr ? 1 : 0, fl: msg.fl ? 1 : 0 }, ws);
+        break;
+      case 'test':
+        user.testing = !!msg.on;
+        broadcast(room, { t: 'test', id: user.id, on: user.testing }, ws);
+        break;
       case 'ping': send({ t: 'pong' }); break;
     }
   });
