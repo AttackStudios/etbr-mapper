@@ -4,6 +4,7 @@ return {
   keyLoad = 'F7',      -- load last / newest map
   keyStart = 'F6',     -- teleport to spawn (host: everyone)
   keyUnload = 'F8',    -- remove custom level
+  experimentalEntities = false, -- custom .etbrEntity creatures + their sounds: still unstable in-game, off for now
   keyPickup = 'E',     -- pick up a custom item (same key as the game's interact)
   keyUse = 'G',        -- use the custom item in your hand
   keyDrop = 'X',       -- drop it

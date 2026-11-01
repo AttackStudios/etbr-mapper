@@ -201,7 +201,9 @@ local function spawnObject(o)
     if not asset then return nil, 'custom asset not in map' end
     local err
     if asset.kind == 'object' then a, err = custom.spawnObject(asset, loc)
-    elseif asset.kind == 'entity' then a, err = custom.spawnEntity(asset, loc, (o.rot or {})[2])
+    elseif asset.kind == 'entity' then
+      if not cfg.experimentalEntities then return nil, 'custom entities are switched off (config.lua: experimentalEntities)' end
+      a, err = custom.spawnEntity(asset, loc, (o.rot or {})[2])
     elseif asset.kind == 'item' then a, err = custom.spawnItem(asset, loc)
     else return nil, 'unknown custom kind ' .. tostring(asset.kind) end
     if not a then return nil, err end
@@ -229,7 +231,18 @@ end
 
 -- ---------- load / unload ----------
 local logicTick
+local playerPawns, teleport -- defined further down
 local function unload(out, keepLive)
+  -- bring players back to where they were before the custom level started (else they fall through the void)
+  if state.returnPos and out ~= false then
+    pcall(function()
+      for _, pp in ipairs(playerPawns()) do
+        local rp = state.returnPos[pp.pc:GetFullName()]
+        if rp then teleport(pp, rp, pp.pc:GetControlRotation()) end
+      end
+    end)
+    state.returnPos = nil
+  end
   local n = 0
   for id in pairs(state.byId) do destroyId(id); n = n + 1 end
   for _, a in ipairs(state.spawnedEntities) do pcall(function() if a:IsValid() then a:K2_DestroyActor() end end) end
@@ -354,7 +367,7 @@ local function loadFile(name, out)
 end
 
 -- ---------- players / teleport ----------
-local function playerPawns()
+playerPawns = function()
   local t = {}
   for _, pc in ipairs(FindAllOf('PlayerController') or {}) do
     if pc:IsValid() then
@@ -371,7 +384,7 @@ local function spawnPoint(i)
   local dy = (i and i > 0) and math.sin(i) * 90 or 0
   return W({ p[1] + dx, p[2] + dy, p[3] }), { Pitch = 0, Yaw = sp.yaw or 0, Roll = 0 }
 end
-local function teleport(pp, loc, rot)
+teleport = function(pp, loc, rot)
   -- proven in ETBCommandsMod setpos: sweep off, teleport physics on
   local ok = pcall(function() pp.pawn:K2_SetActorLocation(loc, false, {}, true) end)
   if not ok then pcall(function() pp.pawn:K2_TeleportTo(loc, rot) end) end
@@ -406,8 +419,9 @@ do
     message = function(text) local pc = localPC(); if pc then pcall(popup, pc, text) end end,
     -- the game's own death (same path its monsters use): server RPC first, native fallback
     kill = function(pp)
-      local ok = pcall(function() pp.pawn:KillServer() end)
-      if not ok then ok = pcall(function() pp.pawn:KillPlayer() end) end
+      -- signatures read in-game: KillServer(bool bResetInteractable), KillPlayer(bool bResetInteractable)
+      local ok = pcall(function() pp.pawn:KillServer(false) end)
+      if not ok then ok = pcall(function() pp.pawn:KillPlayer(false) end) end
       log(ok and 'entity killed a player' or 'entity kill: game kill function not callable')
     end,
     addSanity = function(pp, d) pcall(function() local ps = pp.pc.PlayerState; ps.Sanity = math.max(0, math.min(100, (ps.Sanity or 100) + d)) end) end,
@@ -420,12 +434,17 @@ LoopAsync(50, function()
   end)
   return false
 end)
+LoopAsync(100, function() pcall(custom.drainSounds); return false end)
 RegisterKeyBind(Key[cfg.keyPickup], function() ExecuteInGameThread(function() pcall(custom.tryPickup) end) end)
 RegisterKeyBind(Key[cfg.keyUse], function() ExecuteInGameThread(function() pcall(custom.useHand) end) end)
 RegisterKeyBind(Key[cfg.keyDrop], function() ExecuteInGameThread(function() pcall(custom.dropHand) end) end)
 
 local function start(out)
   if not state.map then return say(out, 'no map loaded — etbr load <name> or etbr live first') end
+  state.returnPos = state.returnPos or {}
+  for _, pp in ipairs(playerPawns()) do
+    pcall(function() local key = pp.pc:GetFullName(); if not state.returnPos[key] then local p = pp.pawn:K2_GetActorLocation(); state.returnPos[key] = { X = p.X, Y = p.Y, Z = p.Z } end end)
+  end
   if isHost() then
     for i, pp in ipairs(playerPawns()) do local l, r = spawnPoint(i - 1); teleport(pp, l, r) end
     say(out, 'started — everyone teleported to the spawn')

@@ -142,7 +142,8 @@ export class CustomUI {
       const [f] = await api.file.pickBytes({ title: 'Choose a sound', filters: [{ name: 'Sound', extensions: SOUND_EXT }] });
       if (!f) return;
       const name = f.name.replace(/\.[^.]+$/, '').replace(/[^\w-]/g, '_');
-      asset.sounds[name] = f.b64; slot(name); render();
+      try { asset.sounds[name] = await toWav(f); } catch (e) { return this.app.toast('Could not read that sound: ' + e.message); }
+      slot(name); render();
     };
 
     const render = () => {
@@ -249,4 +250,25 @@ async function toPng(f) {
   const img = new Image(); img.src = `data:image/${f.ext};base64,${f.b64}`; await img.decode();
   const c = document.createElement('canvas'); c.width = img.width; c.height = img.height; c.getContext('2d').drawImage(img, 0, 0);
   return c.toDataURL('image/png').split(',')[1];
+}
+
+// Any sound (ogg/mp3/wav) -> compact mono 22 kHz 16-bit WAV (max 60 s), which the game's media player always plays.
+async function toWav(f) {
+  const bytes = Uint8Array.from(atob(f.b64), (c) => c.charCodeAt(0));
+  const ctx = new AudioContext();
+  const buf = await ctx.decodeAudioData(bytes.buffer.slice(0));
+  ctx.close();
+  const rate = 22050, secs = Math.min(buf.duration, 60);
+  const off = new OfflineAudioContext(1, Math.ceil(secs * rate), rate);
+  const src = off.createBufferSource(); src.buffer = buf; src.connect(off.destination); src.start();
+  const pcm = (await off.startRendering()).getChannelData(0);
+  const out = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) out.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, 'RIFF'); out.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+  out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true); out.setUint32(24, rate, true);
+  out.setUint32(28, rate * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true); str(36, 'data'); out.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+  const u = new Uint8Array(out.buffer); let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return btoa(s);
 }

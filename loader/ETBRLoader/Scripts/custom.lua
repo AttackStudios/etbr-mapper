@@ -242,7 +242,7 @@ local function scriptApi(owner)
     players = function() local t = {}; for _, pp in ipairs(E.players()) do local p = pp.pawn:K2_GetActorLocation(); t[#t + 1] = { x = p.X, y = p.Y, z = p.Z, id = pp.key, _pp = pp } end; return t end,
     nearestPlayer = function() local best, bd; local me = owner.actor:K2_GetActorLocation(); for _, pp in ipairs(E.players()) do local p = pp.pawn:K2_GetActorLocation(); local d = vdist(me, p); if not bd or d < bd then best, bd = { x = p.X, y = p.Y, z = p.Z, id = pp.key, _pp = pp, dist = d }, d end end; return best end,
     play = function(anim) owner.forceAnim = anim end,
-    sound = function(name) E.log('sound ' .. tostring(name) .. ' (custom sounds: coming soon)') end,
+    sound = function(name, loop) local h = M.playSound(owner.asset, name, owner.actor, loop, falloff(owner.actor)); if h then owner.sounds = owner.sounds or {}; owner.sounds[#owner.sounds + 1] = h end; return h ~= nil end,
     kill = function(p) if p and p._pp then E.kill(p._pp) end end,
     sanity = function(p, delta) if p and p._pp then E.addSanity(p._pp, delta) end end,
     after = function(sec, fn) timers[#timers + 1] = { t = os.clock() + (tonumber(sec) or 0), fn = fn } end,
@@ -252,6 +252,78 @@ function M.tickTimers()
   local now = os.clock()
   for i = #timers, 1, -1 do if now >= timers[i].t then local t = table.remove(timers, i); pcall(t.fn) end end
 end
+
+
+
+
+-- ======================================================================== sounds
+-- Unreal's media player crashed UE4SS here (in-game test), so sounds play through Windows' own
+-- SoundPlayer in a hidden background process. Distance falloff = pre-scaled copies (100/60/30 %).
+local soundFiles = {}
+local function writeOnce(path, bytes)
+  local f = io.open(path, 'rb')
+  if f then f:close(); return end
+  os.execute('mkdir "' .. E.CACHE_DIR .. '" 2>nul')
+  f = io.open(path, 'wb'); f:write(bytes); f:close()
+end
+local function scaled(wavBytes, k)
+  -- 16-bit PCM WAV from the editor: 44-byte header + samples
+  if k >= 0.99 or #wavBytes < 46 then return wavBytes end
+  local out, n = { wavBytes:sub(1, 44) }, 1
+  for pos = 45, #wavBytes - 1, 2 do
+    local v = string.unpack('<i2', wavBytes, pos)
+    n = n + 1; out[n] = string.pack('<i2', math.floor(v * k))
+  end
+  return table.concat(out)
+end
+local LEVELS = { 1, 0.6, 0.3 }
+local function soundFile(asset, name, vol)
+  if not name or name == '' or not asset.sounds or not asset.sounds[name] then return nil end
+  local key = asset.id .. '/' .. name
+  local s = soundFiles[key]
+  if not s then
+    local bytes = M.b64decode(asset.sounds[name])
+    s = { paths = {}, secs = math.max(0.2, (#bytes - 44) / (22050 * 2)) }
+    for i, k in ipairs(LEVELS) do
+      local path = E.CACHE_DIR .. asset.id .. '_snd_' .. name:gsub('[^%w_-]', '_') .. '_' .. i .. '.wav'
+      writeOnce(path, scaled(bytes, k)); s.paths[i] = path
+    end
+    soundFiles[key] = s
+  end
+  local idx = vol > 0.75 and 1 or (vol > 0.4 and 2 or 3)
+  return s.paths[idx], s.secs
+end
+-- launching a process blocks the calling thread, so it never happens on the game thread: queue it
+M.soundQueue = {}
+local function playFile(path) if #M.soundQueue < 4 then M.soundQueue[#M.soundQueue + 1] = path end end
+function M.drainSounds() -- called from a LoopAsync (background) thread
+  local path = table.remove(M.soundQueue, 1)
+  if path then os.execute(('start "" /b powershell -NoProfile -WindowStyle Hidden -Command "(New-Object Media.SoundPlayer \'%s\').PlaySync()"'):format(path)) end
+end
+-- returns a handle; loops re-trigger from tickSounds while audible
+function M.playSound(asset, name, actor, loop, volume)
+  local vol = volume or 1
+  local path, secs = soundFile(asset, name, vol)
+  if not path then return nil end
+  if vol > 0.05 then playFile(path) end
+  return { asset = asset, name = name, actor = actor, loop = loop, vol = vol, secs = secs, next = os.clock() + secs }
+end
+function M.stopSound(h) if h then h.stopped = true end end
+function M.setSoundVolume(h, v) if h then h.vol = v end end
+function M.tickSound(h)
+  if not h or h.stopped or not h.loop then return end
+  if os.clock() >= h.next then
+    h.next = os.clock() + h.secs
+    if h.vol > 0.05 then local path = soundFile(h.asset, h.name, h.vol); if path then playFile(path) end end
+  end
+end
+local function falloff(actor)
+  local me = E.localPawn(); if not me then return 1 end
+  local ok, d = pcall(function() return vdist(me:K2_GetActorLocation(), actor:K2_GetActorLocation()) end)
+  if not ok then return 1 end
+  return math.max(0, math.min(1, 1 - (d - 300) / 2700)) -- full within 3 m, silent beyond 30 m
+end
+M.falloff = falloff
 
 -- ======================================================================== entities
 -- An entity is a plain actor carrying the asset's mesh parts. It walks on the level's walk grid
@@ -293,31 +365,47 @@ local STEP = 45 -- cm an entity can step up/down between cells
 local NB = { { 1, 0, 1 }, { -1, 0, 1 }, { 0, 1, 1 }, { 0, -1, 1 }, { 1, 1, 1.414 }, { 1, -1, 1.414 }, { -1, 1, 1.414 }, { -1, -1, 1.414 } }
 local function astar(si, sj, gi, gj)
   local W = NAV.w
-  local key = function(i, j) return j * W + i end
-  local open, g, came, f = { [key(si, sj)] = true }, { [key(si, sj)] = 0 }, {}, {}
-  local function hcost(i, j) local dx, dy = math.abs(i - gi), math.abs(j - gj); return math.max(dx, dy) + 0.414 * math.min(dx, dy) end
-  f[key(si, sj)] = hcost(si, sj)
-  local expansions = 0
-  while next(open) and expansions < 6000 do
-    expansions = expansions + 1
-    local bk, bf = nil, math.huge
-    for k in pairs(open) do if f[k] < bf then bk, bf = k, f[k] end end
-    local ci, cj = bk % W, bk // W
-    if ci == gi and cj == gj then
-      local path, k = {}, bk
-      while k do table.insert(path, 1, { k % W, k // W }); k = came[k] end
-      return path
+  local function key(i, j) return j * W + i end
+  local heap, hn = {}, 0 -- binary min-heap of {f, k}
+  local function push(f, k)
+    hn = hn + 1; heap[hn] = { f, k }; local i = hn
+    while i > 1 do local p = i // 2; if heap[p][1] <= heap[i][1] then break end; heap[p], heap[i] = heap[i], heap[p]; i = p end
+  end
+  local function pop()
+    local top = heap[1]; heap[1] = heap[hn]; heap[hn] = nil; hn = hn - 1
+    local i = 1
+    while true do
+      local l, r, m = i * 2, i * 2 + 1, i
+      if l <= hn and heap[l][1] < heap[m][1] then m = l end
+      if r <= hn and heap[r][1] < heap[m][1] then m = r end
+      if m == i then break end
+      heap[m], heap[i] = heap[i], heap[m]; i = m
     end
-    open[bk] = nil
-    local cf = floorAt(ci, cj)
-    for _, d in ipairs(NB) do
-      local ni, nj = ci + d[1], cj + d[2]
-      local nf = floorAt(ni, nj)
-      -- no corner cutting: both side cells must be walkable for diagonals
-      if nf and math.abs(nf - cf) <= STEP and (d[3] == 1 or (floorAt(ci + d[1], cj) and floorAt(ci, cj + d[2]))) then
-        local nk = key(ni, nj)
-        local ng = g[bk] + d[3]
-        if not g[nk] or ng < g[nk] then g[nk] = ng; came[nk] = bk; f[nk] = ng + hcost(ni, nj); open[nk] = true end
+    return top
+  end
+  local function h(i, j) local dx, dy = math.abs(i - gi), math.abs(j - gj); return math.max(dx, dy) + 0.414 * math.min(dx, dy) end
+  local g, came, closed = { [key(si, sj)] = 0 }, {}, {}
+  push(h(si, sj), key(si, sj))
+  local expansions = 0
+  while hn > 0 and expansions < 2500 do
+    local cur = pop(); local ck = cur[2]
+    if not closed[ck] then
+      closed[ck] = true; expansions = expansions + 1
+      local ci, cj = ck % W, ck // W
+      if ci == gi and cj == gj then
+        local path, k = {}, ck
+        while k do table.insert(path, 1, { k % W, k // W }); k = came[k] end
+        return path
+      end
+      local cf = floorAt(ci, cj)
+      for _, d in ipairs(NB) do
+        local ni, nj = ci + d[1], cj + d[2]
+        local nf = floorAt(ni, nj)
+        if nf and math.abs(nf - cf) <= STEP and (d[3] == 1 or (floorAt(ci + d[1], cj) and floorAt(ci, cj + d[2]))) then
+          local nk = key(ni, nj)
+          local ng = g[ck] + d[3]
+          if not closed[nk] and (not g[nk] or ng < g[nk]) then g[nk] = ng; came[nk] = ck; push(ng + h(ni, nj), nk) end
+        end
       end
     end
   end
@@ -339,6 +427,7 @@ function M.spawnEntity(asset, loc, yaw)
   local e = { actor = a, asset = asset, comps = comps, home = loc, pos = { X = loc.X, Y = loc.Y, Z = loc.Z }, yaw = yaw or 0, t = 0, state = 'idle' }
   e.env = sandbox(asset, scriptApi(e))
   M.entities[#M.entities + 1] = e
+  local snd = ((ent.behavior or {}).sounds) or {}
   hook(e.env, 'onSpawn')
   return a
 end
@@ -406,8 +495,9 @@ local function walkToward(e, goal, speed, dt)
     local si, sj = snapCell(cellOf(me.X - off[1], me.Y - off[2]))
     local gi, gj = snapCell(cellOf(goal.X - off[1], goal.Y - off[2]))
     if not si or not gi then return false end
-    if not e.path or e.pathGoal ~= gi .. ',' .. gj or (e.repathT or 0) <= 0 then
-      e.path = astar(si, sj, gi, gj); e.pathGoal = gi .. ',' .. gj; e.repathT = 0.5; e.pathIdx = 2
+    if (not e.path or e.pathGoal ~= gi .. ',' .. gj or (e.repathT or 0) <= 0) and not M._pathedThisTick then
+      M._pathedThisTick = true
+      e.path = astar(si, sj, gi, gj); e.pathGoal = gi .. ',' .. gj; e.repathT = 1.5; e.pathIdx = 2
     end
     e.repathT = (e.repathT or 0) - dt
     if not e.path then return false end
@@ -433,6 +523,7 @@ local function walkToward(e, goal, speed, dt)
 end
 
 function M.tickEntities(dt)
+  M._pathedThisTick = false
   for i = #M.entities, 1, -1 do
     local e = M.entities[i]
     local a = e.actor
@@ -445,7 +536,12 @@ function M.tickEntities(dt)
         local ok, p = pcall(function() return pp.pawn:K2_GetActorLocation() end)
         if ok and p then local d = vdist(me, p); if d < (e.chasing and (b.loseSight or 3500) or (b.sight or 2500)) and (not td or d < td) then target, td = pp, d end end
       end
-      if target and not e.chasing then hook(e.env, 'onSeePlayer', { _pp = target }) end
+      if target and not e.chasing then
+        hook(e.env, 'onSeePlayer', { _pp = target })
+        local cs = (b.sounds or {}).chase
+        if cs and cs ~= '' then M.stopSound(e.chaseSound); e.chaseSound = M.playSound(e.asset, cs, a, false, falloff(a)) end
+      end
+      if e.idleSound then M.setSoundVolume(e.idleSound, falloff(a) * 0.8); M.tickSound(e.idleSound) end
       e.chasing = target ~= nil
       local mode = b.mode or 'chase'
       local frozen = mode == 'static' or (mode == 'stalk' and watched(me))
@@ -472,7 +568,12 @@ function M.tickEntities(dt)
         e.state = 'attack'
         if target.isLocal then
           hook(e.env, 'onTouch', { _pp = target })
-          if b.kill and not e.killedAt then e.killedAt = os.clock(); E.kill(target) end
+          if b.kill and not e.killedAt then
+            e.killedAt = os.clock()
+            local ks = (b.sounds or {}).kill
+            if ks and ks ~= '' then M.playSound(e.asset, ks, a, false, 1) end
+            E.kill(target)
+          end
         end
       end
       if e.killedAt and os.clock() - e.killedAt > 4 then e.killedAt = nil end
@@ -557,6 +658,6 @@ function M.useHand()
 end
 function M.dropHand() dropHand() end
 
-function M.forgetAll() M.entities, M.items, hand, timers = {}, {}, nil, {} end
+function M.forgetAll() M.entities, M.items, hand, timers, soundFiles = {}, {}, nil, {}, {} end
 
 return M
