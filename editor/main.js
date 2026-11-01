@@ -179,6 +179,47 @@ ipcMain.handle('game:launch', async () => {
   if (!running) await shell.openExternal('steam://rungameid/1943950');
   return { running };
 });
+// ---------- custom assets (.etbrObject / .etbrEntity / .etbrItem) ----------
+const CUSTOM = path.join(USER, 'custom');
+const ASSET_EXT = { object: 'etbrObject', entity: 'etbrEntity', item: 'etbrItem' };
+ipcMain.handle('custom:list', () => {
+  fs.mkdirSync(CUSTOM, { recursive: true });
+  return fs.readdirSync(CUSTOM).filter((f) => f.endsWith('.json')).map((f) => { try { return fs.readFileSync(path.join(CUSTOM, f), 'utf8'); } catch { return null; } }).filter(Boolean);
+});
+ipcMain.handle('custom:save', (_e, text) => {
+  const a = JSON.parse(text);
+  if (a.format !== 'etbr-asset' || !/^[\w-]{4,64}$/.test(a.id)) throw new Error('not a custom asset');
+  fs.mkdirSync(CUSTOM, { recursive: true });
+  fs.writeFileSync(path.join(CUSTOM, a.id + '.json'), text);
+  return true;
+});
+ipcMain.handle('custom:delete', (_e, id) => { try { fs.unlinkSync(path.join(CUSTOM, String(id).replace(/[^\w-]/g, '') + '.json')); } catch {} return true; });
+ipcMain.handle('custom:import', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Import custom content', properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'ETBR custom content', extensions: ['etbrObject', 'etbrEntity', 'etbrItem'] }] });
+  if (r.canceled) return [];
+  return r.filePaths.map((p) => ({ path: p, text: fs.readFileSync(p, 'utf8') }));
+});
+ipcMain.handle('custom:export', async (_e, text) => {
+  const a = JSON.parse(text);
+  const ext = ASSET_EXT[a.kind] || 'etbrObject';
+  const r = await dialog.showSaveDialog(win, { title: 'Export custom content', defaultPath: (a.name || 'Custom').replace(/[^\w -]/g, '') + '.' + ext, filters: [{ name: ext, extensions: [ext] }] });
+  if (r.canceled) return null;
+  fs.writeFileSync(r.filePath, text);
+  return r.filePath;
+});
+// pick a file and hand its bytes to the renderer (models, textures, sounds, scripts)
+ipcMain.handle('file:pickBytes', async (_e, { title, filters, multi }) => {
+  const r = await dialog.showOpenDialog(win, { title, filters, properties: multi ? ['openFile', 'multiSelections'] : ['openFile'] });
+  if (r.canceled) return [];
+  return r.filePaths.map((p) => ({ name: path.basename(p), ext: path.extname(p).slice(1).toLowerCase(), b64: fs.readFileSync(p).toString('base64'), dir: path.dirname(p) }));
+});
+// sibling files (.gltf buffers/textures, .obj .mtl + textures) resolved relative to the model
+ipcMain.handle('file:readSibling', (_e, dir, rel) => {
+  const full = path.normalize(path.join(dir, decodeURIComponent(rel)));
+  if (!full.startsWith(path.normalize(dir))) return null;
+  try { return fs.readFileSync(full).toString('base64'); } catch { return null; }
+});
 ipcMain.handle('shell:open', (_e, url) => shell.openExternal(url));
 ipcMain.handle('shell:showItem', (_e, p) => shell.showItemInFolder(p));
 ipcMain.handle('app:quit', () => { win.__forceClose = true; win.close(); });

@@ -9,7 +9,8 @@ contextBridge.exposeInMainWorld('etbr', {
     onProgress: (fn) => ipcRenderer.on('library:progress', (_e, p) => fn(p)),
     onLog: (fn) => ipcRenderer.on('library:log', (_e, l) => fn(l)),
   },
-  file: { open: inv('file:open'), openPath: inv('file:openPath'), save: inv('file:save') },
+  file: { open: inv('file:open'), openPath: inv('file:openPath'), save: inv('file:save'), pickBytes: inv('file:pickBytes'), readSibling: inv('file:readSibling') },
+  custom: { list: inv('custom:list'), save: inv('custom:save'), remove: inv('custom:delete'), import: inv('custom:import'), export: inv('custom:export') },
   shell: { open: inv('shell:open'), showItem: inv('shell:showItem') },
   app: { quit: inv('app:quit'), onClosing: (fn) => ipcRenderer.on('app:closing', fn) },
 });

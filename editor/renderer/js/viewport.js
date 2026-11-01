@@ -504,6 +504,7 @@ export class Viewport extends EventTarget {
       return;
     }
     const it = this.placeItem;
+    if (it.kind === 'custom') this.app.customUI?.ensureInMap(it.id); // the level carries its own copy of the asset
     const item = { id: newId('o'), asset: it.id, kind: it.kind, pos, rot: quatToUeRot(this.ghost.quaternion), scale: [1, 1, 1], layer: this.app.activeLayer || 'Default' };
     if (it.props) item.props = { ...it.props };
     this.doc.apply([{ o: 'add', c: 'objects', item }], { label: 'Place ' + it.name });

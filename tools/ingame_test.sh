@@ -3,7 +3,7 @@
 #   tools/ingame_test.sh <SaveName> <mapName> [extra dev commands...]
 set -u
 SAVE="${1:-ETBRTest}"; MAP="${2:-ETBRTest}"; shift 2 || true
-PC="jackpc@192.168.1.34"; KEY="$HOME/.ssh/tidepool_win"; J="$HOME/.claude/jobs/a3c39b51/tmp"
+PC="${ETBR_PC:-jackpc}"; KEY="$HOME/.ssh/tidepool_win"; J="$HOME/.claude/jobs/a3c39b51/tmp"
 cd "$(dirname "$0")/.."
 s() { ssh -i "$KEY" "$PC" "$@" 2>/dev/null; }
 state_world() { WAIT=3 ./tools/devcmd.sh "state" 2>/dev/null | grep -o "world=World [^ ]*" | tail -1; }
@@ -19,7 +19,7 @@ printf 'click 1106 520\nwait 300\ntype %s\nkey {ENTER}\nwait 400\nclick 1106 744
 scp -q -i "$KEY" "$J/click.txt" "$PC:ETBRMapper/click.txt"; s 'schtasks /Run /TN ETBRClick' >/dev/null
 for i in $(seq 1 30); do w=$(state_world); echo "$w" | grep -q "Level0.Level0" && break; sleep 5; done; echo "now: $w"
 WAIT=10 ./tools/devcmd.sh "etbr load $MAP" | grep -E "loaded|skip|still starting"
-WAIT=4 ./tools/devcmd.sh "ue r.SetRes 1280x720w" "etbr start" "look -5 0" "$@" "state" | grep -E "started|state:|spawned"
+WAIT=4 ./tools/devcmd.sh "ue r.SetRes 1280x720w" "etbr start" "look -15 0" "$@" "state" | grep -E "started|state:|spawned"
 s 'del C:\Users\JackPC\ETBRMapper\screen.png & schtasks /Run /TN ETBRShot >nul'
 until s 'if exist C:\Users\JackPC\ETBRMapper\screen.png echo yes' | grep -q yes; do sleep 1; done; sleep 2
 scp -q -i "$KEY" "$PC:ETBRMapper/screen.png" "$J/ingame.png" && echo "screenshot: $J/ingame.png"

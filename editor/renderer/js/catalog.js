@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { ueToThreePos, ueRotToQuat, ueToThreeScale } from './coords.js';
+import { assetPreview, KINDS } from './custom.js';
 
 const LIB = 'etbrlib://lib/';
 
@@ -46,6 +47,7 @@ export const CATEGORIES = [
   { key: 'gameplay', name: 'Gameplay', icon: 'gameplay', hint: 'Doors, triggers, exits, gameplay blueprints' },
   { key: 'packs', name: 'All Meshes', icon: 'meshes', hint: 'Every mesh in the game, by folder' },
   { key: 'logic', name: 'Logic', icon: 'logic', hint: 'Spawn, exits, death zones, checkpoints' },
+  { key: 'custom', name: 'Custom', icon: 'custom', hint: 'Your own objects, entities and items (.etbrObject / .etbrEntity / .etbrItem)' },
 ];
 
 export class Catalog {
@@ -71,6 +73,17 @@ export class Catalog {
   }
   get(id) { return this.byId.get(id); }
 
+  // custom assets live in the same list so search, thumbnails and placement just work
+  addCustom(asset) {
+    const it = { id: asset.id, kind: 'custom', name: asset.name || 'Custom', cat: 'custom', customKind: asset.kind, asset, icon: asset.icon || '' };
+    it.search = (it.name + ' ' + (asset.description || '') + ' custom ' + asset.kind).toLowerCase();
+    const i = this.items.findIndex((x) => x.id === asset.id);
+    if (i >= 0) this.items[i] = it; else this.items.push(it);
+    this.byId.set(asset.id, it);
+    return it;
+  }
+  removeCustom(id) { this.items = this.items.filter((x) => x.id !== id); this.byId.delete(id); }
+
   // list for the palette: category + group (level / folder) + search
   query({ cat, group, q }) {
     q = (q || '').trim().toLowerCase();
@@ -80,6 +93,7 @@ export class Catalog {
       list = list.filter((i) => words.every((w) => i.search.includes(w)));
     } else if (cat === 'kits') list = list.filter((i) => i.kind === 'mesh' && (i.levels || []).includes(group));
     else if (cat === 'packs') list = list.filter((i) => i.kind === 'mesh' && i.folder === group);
+    else if (cat === 'custom') list = list.filter((i) => i.cat === 'custom' && (!group || group === 'all' || i.customKind === group));
     else list = list.filter((i) => i.cat === cat);
     return list.slice().sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
   }
@@ -138,6 +152,7 @@ export class Catalog {
       return t ? t.clone(true) : placeholder(item.name, '#ff4d4d', 1);
     }
     if (item.kind === 'text') return textSign(item.props?.text || 'Text', item.props?.color, item.props?.size);
+    if (item.kind === 'custom') return assetPreview(item.asset);
     if (item.builtin) return lightGizmo(item.builtin);
     if (item.parts?.length) {
       const g = new THREE.Group();
@@ -248,8 +263,27 @@ export class Thumbnailer {
     const d = new THREE.DirectionalLight('#ffffff', 1.6); d.position.set(3, 5, 4); this.scene.add(d);
     this.cam = new THREE.PerspectiveCamera(35, 1, 0.01, 1000);
   }
+  async renderObject(obj, size = 160) {
+    this.renderer.setSize(size, size);
+    this.scene.add(obj);
+    const box = new THREE.Box3().setFromObject(obj);
+    const c = box.getCenter(new THREE.Vector3()), r = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.05);
+    const dist = r / Math.sin((35 * Math.PI) / 360) * 1.05;
+    this.cam.position.copy(c).add(new THREE.Vector3(1, 0.7, 1.2).normalize().multiplyScalar(dist));
+    this.cam.near = dist / 100; this.cam.far = dist * 10; this.cam.updateProjectionMatrix(); this.cam.lookAt(c);
+    await new Promise((r) => setTimeout(r, 250)); // textures from data URLs
+    this.renderer.render(this.scene, this.cam);
+    const data = this.renderer.domElement.toDataURL('image/png');
+    this.scene.remove(obj); this.renderer.setSize(160, 160);
+    return data;
+  }
   url(item) { return LIB + 'thumbs/' + item.id.replace(/[^a-z0-9_.-]/gi, '_') + '.png'; }
   request(item, img) {
+    if (item.icon) { img.src = item.icon; return; } // custom assets carry their own thumbnail
+    if (item.kind === 'custom') { // no saved icon: render one (waits for its embedded textures)
+      this.renderObject(assetPreview(item.asset)).then((d) => { item.icon = d; img.src = d; });
+      return;
+    }
     if (this.done.has(item.id)) { img.src = this.done.get(item.id); return; }
     // try the disk cache first
     const url = this.url(item) + '?v=1';

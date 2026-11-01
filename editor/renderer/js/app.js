@@ -6,6 +6,8 @@ import { Viewport } from './viewport.js';
 import { Collab } from './collab.js';
 import { Tutorial } from './tutorial.js';
 import { icon, hydrateIcons, logoMark } from './icons.js';
+import { CustomUI } from './customui.js';
+import { KINDS } from './custom.js';
 
 const api = window.etbr;
 const $ = (s, r = document) => r.querySelector(s);
@@ -35,6 +37,8 @@ class App {
     this.activeLayer = 'Default';
     this.hiddenLayers = new Set();
     this.clipboard = null;
+    this.h = h;
+    this.customUI = new CustomUI(this);
   }
 
   // ================================================================ boot
@@ -70,8 +74,9 @@ class App {
     const st = await api.library.status();
     this.libraryReady(st.catalog);
   }
-  libraryReady(cat) {
+  async libraryReady(cat) {
     this.catalog.setData(cat);
+    await this.customUI.loadLibrary();
     this.thumbs = new Thumbnailer(this.catalog);
     this.defaultKit();
     $('#boot-library').hidden = true; $('#boot-start').hidden = false;
@@ -111,7 +116,10 @@ class App {
     this.viewport.addEventListener('cursor', (e) => { const p = e.detail; $('#st-cursor').textContent = `${r1(p.x, 10)}, ${r1(p.z, 10)}, ${r1(p.y, 10)} m`; });
     this.collab.addEventListener('change', () => { this.renderPeople(); this.status(); });
     this.collab.addEventListener('chat', (e) => this.addChat(e.detail));
-    this.doc.on((ops, src) => { if (ops.some((o) => o.o === 'replace' || o.o === 'cfg')) { this.renderLevel(); $('#level-name').value = this.doc.map.meta.name || ''; } });
+    this.doc.on((ops, src) => {
+      if (ops.some((o) => o.o === 'replace' || o.o === 'cfg')) { this.renderLevel(); $('#level-name').value = this.doc.map.meta.name || ''; }
+      if (ops.some((o) => o.o === 'replace' || o.o === 'asset')) this.customUI.adoptMapAssets().then(() => this.viewport.rebuild());
+    });
 
     // toolbar
     $$('#topbar [data-act]').forEach((b) => (b.onclick = () => this.act(b.dataset.act)));
@@ -319,11 +327,13 @@ class App {
       }
       groups.append(sel);
     }
+    if (!this.q && this.cat === 'custom') { this.group = this.customUI.filter; groups.append(this.customUI.paletteHeader()); }
     if (!this.q && this.cat === 'logic') {
       for (const t of LOGIC_TYPES) grid.append(h('div', { class: 'card logic-card', onclick: (e) => this.pickLogic(t.type, e.currentTarget) }, h('i', { class: 'sw', style: `background:${t.color}` }), h('div', {}, h('b', {}, t.name), h('small', {}, t.desc))));
     }
     const list = this.catalog.query({ cat: this.cat, group: this.group, q: this.q });
-    if (!list.length && this.cat !== 'logic') grid.append(h('div', { class: 'pal-empty' }, this.q ? `Nothing matches “${this.q}”` : 'Nothing here'));
+    if (!list.length && this.cat === 'custom' && !this.q) grid.append(h('div', { class: 'pal-empty' }, 'No custom content yet. Import a .etbrObject / .etbrEntity / .etbrItem file, or click Create new to make one from a 3D model.'));
+    else if (!list.length && this.cat !== 'logic') grid.append(h('div', { class: 'pal-empty' }, this.q ? `Nothing matches “${this.q}”` : 'Nothing here'));
     const LIMIT = 300;
     const render = (from) => {
       const io = this.cardObserver || (this.cardObserver = new IntersectionObserver((ents) => {
@@ -413,6 +423,9 @@ class App {
     el.append(h('div', { class: 'insp-title' }, img, h('div', {}, h('b', {}, item?.name || 'Missing asset'), h('small', {}, it.asset || it.kind))));
     if (item?.levels?.length) el.append(h('div', {}, ...item.levels.map((l) => h('span', { class: 'tag-chip' }, LEVEL_NAMES[l] || l))));
     if (item?.cat === 'entities') el.append(h('p', { class: 'small muted' }, 'Entity: the host spawns it in co-op, and everyone sees it.'));
+    if (item?.kind === 'custom') el.append(h('div', { class: 'row', style: 'margin:6px 0' }, h('span', { class: 'tag-chip' }, 'Custom ' + (KINDS[item.customKind]?.label || '')),
+      h('button', { class: 'small', onclick: () => this.customUI.openWizard(item.asset) }, 'Edit asset'),
+      h('button', { class: 'small', onclick: () => this.customUI.exportAsset(item.asset) }, icon('export', 13), ' Export file')));
     const set = (patch, label) => this.doc.apply([{ o: 'set', c, id: it.id, patch }], { label });
     el.append(
       this.vecField('Position', it.pos.map((v) => v / 100), 'm', (v) => set({ pos: v.map((x) => Math.round(x * 100)) }, 'Move'), 0.1),

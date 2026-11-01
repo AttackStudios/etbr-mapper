@@ -15,6 +15,7 @@
 -- Hotkeys: F7 load (live if the editor set it up) · F6 start · F8 unload
 local json = require('json')
 local cfg = require('config')
+local custom = require('custom')
 
 local VERSION = '1.2.0'
 math.randomseed(os.time())
@@ -109,6 +110,14 @@ end
 
 local SMA_CLASS = '/Script/Engine.StaticMeshActor'
 local TEXT_CLASS = '/Script/Engine.TextRenderActor'
+custom.init({
+  spawn = function(c, l) return spawn(c, l) end,
+  findClass = function(p) return findObj(classCache, p) end,
+  findObj = function(p) return findObj(assetCache, p) end,
+  world = function() return currentWorld() end,
+  log = function(m) log(m) end,
+  CACHE_DIR = MOD_DIR .. 'cache\\',
+})
 
 -- Lights spawned at runtime must be Movable: Static/Stationary lights rely on baked lighting and render
 -- nothing when spawned in a running game (found in-game: a built Level 0 room was pitch black).
@@ -189,6 +198,15 @@ local function spawnObject(o)
   elseif o.kind == 'text' then
     a = spawn(findObj(classCache, TEXT_CLASS), loc)
     if not a then return nil, 'spawn failed' end
+  elseif o.kind == 'custom' then
+    local asset = state.map and state.map.customAssets and state.map.customAssets[o.asset]
+    if not asset then return nil, 'custom asset not in map' end
+    if asset.kind == 'object' then
+      local err; a, err = custom.spawnObject(asset, loc)
+      if not a then return nil, err end
+    else
+      return nil, 'custom ' .. tostring(asset.kind) .. ' not supported yet'
+    end
   else
     local cls = findObj(classCache, o.asset)
     if not cls then return nil, 'class not found' end
@@ -251,6 +269,7 @@ local function forgetWorld(reason)
   for k in pairs(classCache) do classCache[k] = nil end
   for k in pairs(assetCache) do assetCache[k] = nil end
   GS, KSL = nil, nil
+  custom.forgetWorld()
   state.byId, state.spawnedEntities, state.spawners, state.fills = {}, {}, {}, {}
   state.triggered, state.checkpoints, state.loading = {}, {}, false
   popups = {}
@@ -514,6 +533,9 @@ local function applyOps(ops)
       local k = op.k == 'meta' and 'meta' or 'settings'
       m[k] = m[k] or {}; merge(m[k], op.patch or {})
       if op.patch and (op.patch.offset or op.patch.lighting or op.patch.lightBoost) then state.live.rev = -1 end -- full rebuild
+    elseif op.o == 'asset' and op.asset then
+      m.customAssets = m.customAssets or {}
+      m.customAssets[op.asset.id] = op.asset
     elseif op.o == 'replace' then
       state.live.rev = -1
     end

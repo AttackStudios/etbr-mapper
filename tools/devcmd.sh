@@ -1,7 +1,7 @@
 #!/bin/bash
 # Send dev commands to the running game (needs dev.enable on the PC) and print new [ETBR] log lines.
 #   tools/devcmd.sh "etbr load ETBRTest" "state"   [WAIT=seconds]
-PC="${ETBR_PC:-jackpc@192.168.1.34}"; KEY="$HOME/.ssh/tidepool_win"
+PC="${ETBR_PC:-jackpc}"; KEY="$HOME/.ssh/tidepool_win"
 MODS='C:\Program Files (x86)\Steam\steamapps\common\EscapeTheBackrooms\EscapeTheBackrooms\Binaries\Win64\ue4ss'
 tmp=$(mktemp); printf '%s\r\n' "$@" > "$tmp"
 before=$(ssh -i "$KEY" "$PC" "powershell -NoProfile -Command \"(Get-Content -LiteralPath '$MODS\\UE4SS.log').Count\"" 2>/dev/null | tr -d '\r')

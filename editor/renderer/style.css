@@ -145,6 +145,20 @@ button .ic { margin-right: 1px; }
 .toast { background: rgba(27,26,19,.97); border: 1px solid var(--line2); padding: 8px 14px; border-radius: 20px; box-shadow: 0 8px 24px rgba(0,0,0,.5); animation: rise .18s; }
 @keyframes fade { from { opacity: 0; } } @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
 
+/* ---------- custom content ---------- */
+.custom-head { display: flex; flex-direction: column; }
+.custom-head .row button { flex: 1; }
+.modal.wiz { width: min(980px, 95vw); display: flex; flex-direction: column; overflow: hidden; max-height: 90vh; }
+.modal.wiz .actions { flex: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.wiz-top { display: flex; justify-content: space-between; align-items: center; }
+.wiz-cols { display: grid; grid-template-columns: 1fr 300px; gap: 20px; flex: 1; min-height: 0; }
+.wiz-body { overflow-y: auto; padding-right: 6px; }
+.wiz-side { display: flex; flex-direction: column; gap: 8px; }
+.wiz-view canvas { border-radius: 12px; background: radial-gradient(circle at 50% 40%, #2e2b1f, #14120c); border: 1px solid var(--line); }
+.seg { display: flex; gap: 4px; }
+.seg button { flex: 1; padding: 10px; }
+textarea.code { width: 100%; font: 12px/1.45 Consolas, monospace; background: #0c0b07; color: #e9e2c6; }
+
 /* ---------- tutorial ---------- */
 .tut-ring { position: fixed; border: 2px solid var(--accent); border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,.55), 0 0 24px rgba(242,212,92,.6); pointer-events: none; z-index: 70; transition: all .25s; }
 .tut-card { position: fixed; z-index: 71; width: 330px; background: var(--panel); border: 1px solid var(--accent2); border-radius: 14px; padding: 16px 18px; box-shadow: 0 20px 60px rgba(0,0,0,.6); transition: all .25s; }

@@ -3,7 +3,7 @@
 #   tools/sync.sh extractor editor ...
 set -e
 cd "$(dirname "$0")/.."
-PC="${ETBR_PC:-jackpc@192.168.1.34}"
+PC="${ETBR_PC:-jackpc}"
 KEY="$HOME/.ssh/tidepool_win"
 for d in "$@"; do
   tar --no-xattrs -czf "/tmp/etbr_sync_$d.tgz" --exclude node_modules --exclude bin --exclude obj --exclude dist "$d"
