@@ -1,0 +1,19 @@
+{
+  "name": "etbr-mapper",
+  "productName": "ETBR Mapper",
+  "version": "1.0.0",
+  "description": "Level editor for Escape the Backrooms — build, collab live, export .etbrmap",
+  "author": "AttackStudioYT",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build:three": "node scripts/copy-three.js"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "electron": "33.2.1"
+  }
+}
