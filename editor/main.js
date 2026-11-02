@@ -169,7 +169,7 @@ ipcMain.handle('game:writeLive', (_e, live) => {
   if (!gameDir) return { ok: false, error: 'Game folder not found' };
   const loader = path.join(gameDir, ...LOADER_REL);
   if (!fs.existsSync(loader)) return { ok: false, error: 'The ETBR loader mod is not installed — run ETBR-Mapper-Setup.exe first.' };
-  fs.writeFileSync(path.join(loader, 'live.json'), JSON.stringify({ ...live, written: new Date().toISOString() }, null, 1));
+  fs.writeFileSync(path.join(loader, 'live.json'), JSON.stringify({ ...live, written: new Date().toISOString(), epoch: Math.floor(Date.now() / 1000) }, null, 1));
   return { ok: true };
 });
 ipcMain.handle('game:launch', async () => {

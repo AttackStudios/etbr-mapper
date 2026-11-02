@@ -2,7 +2,8 @@
 # Baseline: start a fresh Level 0 game and screenshot WITHOUT touching anything (no load/teleport/look).
 set -u
 SAVE="${1:-ETBRBase}"
-PC="${ETBR_PC:-jackpc}"; KEY="$HOME/.ssh/tidepool_win"; J="$HOME/.claude/jobs/a3c39b51/tmp"
+source "$(dirname "$0")/pcenv.sh"
+J="$HOME/.claude/jobs/a3c39b51/tmp"
 cd "$(dirname "$0")/.."
 s() { ssh -i "$KEY" "$PC" "$@" 2>/dev/null; }
 state_world() { WAIT=3 ./tools/devcmd.sh "state" 2>/dev/null | grep -o "world=World [^ ]*" | tail -1; }

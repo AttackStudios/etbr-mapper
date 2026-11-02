@@ -60,8 +60,9 @@ local function texture(asset, name)
   local path = E.CACHE_DIR .. asset.id .. '_' .. name:gsub('[^%w_-]', '_') .. '.png'
   local f = io.open(path, 'rb')
   if not f then
-    os.execute('mkdir "' .. E.CACHE_DIR .. '" 2>nul')
-    f = io.open(path, 'wb'); f:write(M.b64decode(asset.textures[name])); f:close()
+    f = io.open(path, 'wb')
+    if not f then E.log('custom: cache folder not writable: ' .. path); texCache[key] = false; return nil end
+    f:write(M.b64decode(asset.textures[name])); f:close()
   else f:close() end
   local ok, tex = pcall(function()
     return StaticFindObject('/Script/Engine.Default__KismetRenderingLibrary'):ImportFileAsTexture2D(E.world(), path)
@@ -245,77 +246,49 @@ local function scriptApi(owner)
     sound = function(name, loop) local h = M.playSound(owner.asset, name, owner.actor, loop, falloff(owner.actor)); if h then owner.sounds = owner.sounds or {}; owner.sounds[#owner.sounds + 1] = h end; return h ~= nil end,
     kill = function(p) if p and p._pp then E.kill(p._pp) end end,
     sanity = function(p, delta) if p and p._pp then E.addSanity(p._pp, delta) end end,
-    after = function(sec, fn) timers[#timers + 1] = { t = os.clock() + (tonumber(sec) or 0), fn = fn } end,
+    after = function(sec, fn) timers[#timers + 1] = { t = E.now() + (tonumber(sec) or 0), fn = fn } end,
   }
 end
 function M.tickTimers()
-  local now = os.clock()
+  local now = E.now()
   for i = #timers, 1, -1 do if now >= timers[i].t then local t = table.remove(timers, i); pcall(t.fn) end end
 end
 
 
 
 
+
 -- ======================================================================== sounds
--- Unreal's media player crashed UE4SS here (in-game test), so sounds play through Windows' own
--- SoundPlayer in a hidden background process. Distance falloff = pre-scaled copies (100/60/30 %).
-local soundFiles = {}
-local function writeOnce(path, bytes)
-  local f = io.open(path, 'rb')
-  if f then f:close(); return end
-  os.execute('mkdir "' .. E.CACHE_DIR .. '" 2>nul')
-  f = io.open(path, 'wb'); f:write(bytes); f:close()
-end
-local function scaled(wavBytes, k)
-  -- 16-bit PCM WAV from the editor: 44-byte header + samples
-  if k >= 0.99 or #wavBytes < 46 then return wavBytes end
-  local out, n = { wavBytes:sub(1, 44) }, 1
-  for pos = 45, #wavBytes - 1, 2 do
-    local v = string.unpack('<i2', wavBytes, pos)
-    n = n + 1; out[n] = string.pack('<i2', math.floor(v * k))
-  end
-  return table.concat(out)
-end
-local LEVELS = { 1, 0.6, 0.3 }
-local function soundFile(asset, name, vol)
+-- Played by the hidden helper (Windows media player), never by a process launched from the game:
+-- Unreal's media framework aborts UE4SS here, and launching a process per sound stalled the game.
+-- Volume falls off with distance; loops are handled by the helper.
+local soundFiles, soundSeq = {}, 0
+local function soundFile(asset, name)
   if not name or name == '' or not asset.sounds or not asset.sounds[name] then return nil end
   local key = asset.id .. '/' .. name
-  local s = soundFiles[key]
-  if not s then
-    local bytes = M.b64decode(asset.sounds[name])
-    s = { paths = {}, secs = math.max(0.2, (#bytes - 44) / (22050 * 2)) }
-    for i, k in ipairs(LEVELS) do
-      local path = E.CACHE_DIR .. asset.id .. '_snd_' .. name:gsub('[^%w_-]', '_') .. '_' .. i .. '.wav'
-      writeOnce(path, scaled(bytes, k)); s.paths[i] = path
-    end
-    soundFiles[key] = s
+  if soundFiles[key] then return soundFiles[key] end
+  local path = E.CACHE_DIR .. asset.id .. '_snd_' .. name:gsub('[^%w_-]', '_') .. '.wav'
+  local f = io.open(path, 'rb')
+  if f then f:close()
+  else
+    f = io.open(path, 'wb'); if not f then return nil end
+    f:write(M.b64decode(asset.sounds[name])); f:close()
   end
-  local idx = vol > 0.75 and 1 or (vol > 0.4 and 2 or 3)
-  return s.paths[idx], s.secs
+  soundFiles[key] = path
+  return path
 end
--- launching a process blocks the calling thread, so it never happens on the game thread: queue it
-M.soundQueue = {}
-local function playFile(path) if #M.soundQueue < 4 then M.soundQueue[#M.soundQueue + 1] = path end end
-function M.drainSounds() -- called from a LoopAsync (background) thread
-  local path = table.remove(M.soundQueue, 1)
-  if path then os.execute(('start "" /b powershell -NoProfile -WindowStyle Hidden -Command "(New-Object Media.SoundPlayer \'%s\').PlaySync()"'):format(path)) end
-end
--- returns a handle; loops re-trigger from tickSounds while audible
+-- returns a handle (use setSoundVolume / stopSound); volume 0..1
 function M.playSound(asset, name, actor, loop, volume)
-  local vol = volume or 1
-  local path, secs = soundFile(asset, name, vol)
+  local path = soundFile(asset, name)
   if not path then return nil end
-  if vol > 0.05 then playFile(path) end
-  return { asset = asset, name = name, actor = actor, loop = loop, vol = vol, secs = secs, next = os.clock() + secs }
+  soundSeq = soundSeq + 1
+  local h = { id = 's' .. soundSeq, vol = volume or 1 }
+  E.hcmd(('play|%s|%s|%.2f|%d'):format(h.id, path, h.vol, loop and 1 or 0))
+  return h
 end
-function M.stopSound(h) if h then h.stopped = true end end
-function M.setSoundVolume(h, v) if h then h.vol = v end end
-function M.tickSound(h)
-  if not h or h.stopped or not h.loop then return end
-  if os.clock() >= h.next then
-    h.next = os.clock() + h.secs
-    if h.vol > 0.05 then local path = soundFile(h.asset, h.name, h.vol); if path then playFile(path) end end
-  end
+function M.stopSound(h) if h and not h.stopped then h.stopped = true; E.hcmd('stop|' .. h.id) end end
+function M.setSoundVolume(h, v)
+  if h and not h.stopped and math.abs((h.vol or 0) - v) > 0.05 then h.vol = v; E.hcmd(('vol|%s|%.2f'):format(h.id, v)) end
 end
 local function falloff(actor)
   local me = E.localPawn(); if not me then return 1 end
@@ -428,6 +401,8 @@ function M.spawnEntity(asset, loc, yaw)
   e.env = sandbox(asset, scriptApi(e))
   M.entities[#M.entities + 1] = e
   local snd = ((ent.behavior or {}).sounds) or {}
+  local snd = (ent.behavior or {}).sounds or {}
+  if snd.idle and snd.idle ~= '' then e.idleSound = M.playSound(asset, snd.idle, a, true, 0) end
   hook(e.env, 'onSpawn')
   return a
 end
@@ -541,7 +516,8 @@ function M.tickEntities(dt)
         local cs = (b.sounds or {}).chase
         if cs and cs ~= '' then M.stopSound(e.chaseSound); e.chaseSound = M.playSound(e.asset, cs, a, false, falloff(a)) end
       end
-      if e.idleSound then M.setSoundVolume(e.idleSound, falloff(a) * 0.8); M.tickSound(e.idleSound) end
+      e.volT = (e.volT or 0) - dt
+      if e.idleSound and e.volT <= 0 then e.volT = 0.5; M.setSoundVolume(e.idleSound, falloff(a) * 0.8) end
       e.chasing = target ~= nil
       local mode = b.mode or 'chase'
       local frozen = mode == 'static' or (mode == 'stalk' and watched(me))
@@ -569,14 +545,14 @@ function M.tickEntities(dt)
         if target.isLocal then
           hook(e.env, 'onTouch', { _pp = target })
           if b.kill and not e.killedAt then
-            e.killedAt = os.clock()
+            e.killedAt = E.now()
             local ks = (b.sounds or {}).kill
             if ks and ks ~= '' then M.playSound(e.asset, ks, a, false, 1) end
             E.kill(target)
           end
         end
       end
-      if e.killedAt and os.clock() - e.killedAt > 4 then e.killedAt = nil end
+      if e.killedAt and E.now() - e.killedAt > 4 then e.killedAt = nil end
       if M.dbg.anim then animate(e, dt, e.vel) end
       hook(e.env, 'onTick', dt)
     end
@@ -658,6 +634,9 @@ function M.useHand()
 end
 function M.dropHand() dropHand() end
 
-function M.forgetAll() M.entities, M.items, hand, timers, soundFiles = {}, {}, nil, {}, {} end
+function M.forgetAll()
+  for _, e in ipairs(M.entities) do M.stopSound(e.idleSound) end
+  M.entities, M.items, hand, timers = {}, {}, nil, {}
+end
 
 return M

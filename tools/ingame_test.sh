@@ -3,7 +3,8 @@
 #   tools/ingame_test.sh <SaveName> <mapName> [extra dev commands...]
 set -u
 SAVE="${1:-ETBRTest}"; MAP="${2:-ETBRTest}"; shift 2 || true
-PC="${ETBR_PC:-jackpc}"; KEY="$HOME/.ssh/tidepool_win"; J="$HOME/.claude/jobs/a3c39b51/tmp"
+source "$(dirname "$0")/pcenv.sh"
+J="$HOME/.claude/jobs/a3c39b51/tmp"
 cd "$(dirname "$0")/.."
 s() { ssh -i "$KEY" "$PC" "$@" 2>/dev/null; }
 state_world() { WAIT=3 ./tools/devcmd.sh "state" 2>/dev/null | grep -o "world=World [^ ]*" | tail -1; }
@@ -11,6 +12,9 @@ s 'taskkill /f /im CrashReportClient.exe >nul 2>&1 & taskkill /f /im Backrooms-W
 rm -rf "$J/payload/ETBRLoader" && cp -R loader/ETBRLoader "$J/payload/" && rm -rf "$J/payload/ETBRLoader/maps"
 tar -czf "$J/payload.tgz" -C "$J" payload && scp -q -i "$KEY" "$J/payload.tgz" "$PC:ETBRMapper/payload.tgz"
 s 'C:\Users\JackPC\ETBRMapper\redeploy-loader.cmd' | grep -E "DONE"
+# Steam needs a moment to notice a force-closed game, or it refuses with "Game already running"
+s 'taskkill /f /im Backrooms.exe >nul 2>&1'
+sleep 15
 s 'schtasks /Run /TN ETBRGameRun' >/dev/null
 for i in $(seq 1 25); do state_world | grep -q MainMenu && break; sleep 5; done; echo "menu ok"
 WAIT=2 ./tools/devcmd.sh "ue r.SetRes 1600x900f" "ue open Lobby" >/dev/null  # clicks assume fullscreen 1600x900

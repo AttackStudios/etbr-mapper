@@ -37,9 +37,16 @@ ExecuteInGameThread = function(fn) fn() end
 FName = function(s) return s end; FText = function(s) return s end
 local real_open = io.open
 io.open = function(p, m) return real_open((p:gsub('\\', '/')), m) end -- loader uses Windows paths
+local real_remove, real_rename = os.remove, os.rename
+os.remove = function(p) return real_remove((p:gsub('\\', '/'))) end
+os.rename = function(a, b) return real_rename((a:gsub('\\', '/')), (b:gsub('\\', '/'))) end
+os.execute('mkdir -p loader/ETBRLoader/io loader/ETBRLoader/maps')
+local real_exec = os.execute
+os.execute = function(c) if c:find('^mkdir') then return real_exec(c) end; return true end -- never launch the helper here
 local real_print = print
 print = function(s) io.write((tostring(s):gsub('\n$', '')) .. '\n') end
 
+require('config').experimentalEntities = true
 dofile('loader/ETBRLoader/Scripts/main.lua')
 local out = { Log = function(_, s) io.write('  > ' .. s .. '\n') end }
 local function etbr(...) cmds.etbr('etbr', { ... }, out) end
@@ -63,12 +70,12 @@ print('--- start (teleport)'); etbr('start')
 print(('pawn at %.0f %.0f %.0f (expect 0 0 200100)'):format(pawnLoc.X, pawnLoc.Y, pawnLoc.Z))
 print('--- run 30 s of logic ticks (spawner: every 2–4 s, max 2 alive)')
 local before = #spawned
-for _ = 1, 150 do runLoops(1) end
+for _ = 1, 900 do runLoops(1) end
 local hounds = 0
 for i = before + 1, #spawned do local a = spawned[i]; if tostring(a.cls.name):find('Hound') then hounds = hounds + 1; assert(math.abs(math.abs(a.loc.X) - 1000) <= 200 and a.loc.Z == 200000 - 125 + 100, 'spawned outside its area') end end
 print(('hounds spawned: %d (capped by maxAlive=2 → expect 2)'):format(hounds))
 spawned[before + 1].valid = false -- one dies
-for _ = 1, 40 do runLoops(1) end
+for _ = 1, 240 do runLoops(1) end
 local h2 = 0; for i = before + 1, #spawned do if tostring(spawned[i].cls.name):find('Hound') then h2 = h2 + 1 end end
 print(('after one died, total hounds spawned: %d (expect 3)'):format(h2))
 print('--- unload'); etbr('unload')
@@ -83,15 +90,15 @@ local responses = {
   [[{"rev":3,"ops":[{"o":"del","c":"objects","id":"w1"}]}]],
 }
 local urls = {}
-io.popen = function(cmd)
-  urls[#urls + 1] = cmd
-  local body = table.remove(responses, 1) or '{"rev":3,"ops":[]}'
-  return { read = function() return body end, close = function() end }
+local function fakeHelper()
+  local f = real_open('loader/ETBRLoader/io/sync.url', 'rb'); if not f then return end
+  urls[#urls + 1] = f:read('a'); f:close(); real_remove('loader/ETBRLoader/io/sync.url')
+  local o = real_open('loader/ETBRLoader/io/sync.res', 'wb'); o:write(table.remove(responses, 1) or '{"rev":3,"ops":[]}'); o:close()
 end
-local lf = real_open('loader/ETBRLoader/live.json', 'w'); lf:write('{"room":"ABC123","server":"https://x.test","name":"Jack","color":"#f2d45c"}'); lf:close()
+local lf = real_open('loader/ETBRLoader/live.json', 'w'); lf:write('{"room":"ABC123","server":"https://x.test","name":"Jack","color":"#f2d45c","epoch":1}'); lf:close()
 local s0, d0 = #spawned, destroyed
 etbr('live')
-for _ = 1, 12 do runLoops(1) end
+for _ = 1, 400 do runLoops(1); fakeHelper() end
 print(('live: spawned %d, destroyed %d (expect spawned 2, destroyed 1)'):format(#spawned - s0, destroyed - d0))
 print(('w2 moved to X=%.0f (expect 800)'):format(spawned[#spawned].loc.X))
 print('poll URL sample: ' .. (urls[3] or ''):sub(1, 150))
@@ -107,14 +114,14 @@ f2:write([[{"format":"etbrmap","version":1,"meta":{"name":"Mock2"},"settings":{"
  "logic":[{"id":"a1","type":"entityspawn","group":"G","pos":[0,0,0],"size":[400,400,250]}]}]])
 f2:close()
 etbr('load', 'MockTest'); runLoops(3)
-for _ = 1, 20 do runLoops(1) end
+for _ = 1, 200 do runLoops(1) end
 local oldActors = {}
 for _, a in ipairs(spawned) do if a.valid then oldActors[#oldActors + 1] = a end end
 -- travel: new world; Unreal frees the old actors — any method call on them must not happen
 for _, a in ipairs(oldActors) do setmetatable(a, { __index = function() error('TOUCHED A DEAD ACTOR') end }) end
 worldN = 2
 local s1 = #spawned
-local ok, err = pcall(function() for _ = 1, 20 do runLoops(1) end end)
+local ok, err = pcall(function() for _ = 1, 200 do runLoops(1) end end)
 print('ticks after travel ok: ' .. tostring(ok) .. ' ' .. tostring(err or ''))
 print(('spawns after travel without reloading: %d (expect 0)'):format(#spawned - s1))
 ok, err = pcall(function() etbr('load', 'MockTest'); runLoops(3) end)
@@ -147,7 +154,7 @@ worldN = 3
 etbr('load', 'NavTest'); runLoops(3)
 pawnLoc = { X = 875, Y = 125, Z = 200090 } -- other side of the wall, same row
 local crossedAt, maxX = nil, 0
-for tick = 1, 400 do
+for tick = 1, 1200 do
   runLoops(1)
   local e = require('custom').entities[1]
   if e then

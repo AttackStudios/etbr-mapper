@@ -17,7 +17,7 @@ local json = require('json')
 local cfg = require('config')
 local custom = require('custom')
 
-local VERSION = '1.2.0'
+local VERSION = '1.3.0'
 math.randomseed(os.time())
 local SCRIPT_DIR = debug.getinfo(1, 'S').source:match('^@(.*[\\/])') or './'
 local MOD_DIR = SCRIPT_DIR:gsub('[\\/]Scripts[\\/]$', '\\')
@@ -32,6 +32,37 @@ local state = {
 }
 
 local function log(s) print('[ETBR] ' .. tostring(s) .. '\n') end
+
+-- ---------- one scheduler, on the game thread ----------
+-- Everything periodic runs here. No background Lua (several async loops feeding the game thread caused lag and
+-- random crashes) and no process launches from the game: the helper does those, see etbr-helper.ps1.
+local TICK = 0.033
+local jobs = {}
+state.now = 0
+local function every(sec, fn) jobs[#jobs + 1] = { every = sec, left = 0, fn = fn } end
+local function masterTick()
+  state.now = state.now + TICK
+  for _, j in ipairs(jobs) do
+    j.left = j.left - TICK
+    if j.left <= 0 then
+      j.left = j.every
+      local ok, err = pcall(j.fn)
+      if not ok and j.lastErr ~= err then j.lastErr = err; log('tick error: ' .. tostring(err)) end
+    end
+  end
+end
+
+-- ---------- talking to the helper through small files ----------
+local IO_DIR = MOD_DIR .. 'io\\'
+local function hput(name, text)
+  local tmp = IO_DIR .. name .. '.tmp'
+  local f = io.open(tmp, 'wb'); if not f then return false end
+  f:write(text); f:close()
+  os.remove(IO_DIR .. name); os.rename(tmp, IO_DIR .. name)
+  return true
+end
+local cmdSeq = 0
+local function hcmd(line) cmdSeq = cmdSeq + 1; return hput(('%08d.cmd'):format(cmdSeq), line .. '\n') end
 
 -- ---------- engine helpers ----------
 local GS, KSL
@@ -257,11 +288,7 @@ local function readFile(p)
   local s = f:read('a'); f:close(); return s
 end
 
-local function startLogic()
-  if state.logicLoop then return end
-  state.logicLoop = true
-  LoopAsync(200, function() ExecuteInGameThread(function() pcall(logicTick) end); return false end)
-end
+every(0.2, function() if logicTick then logicTick() end end)
 
 -- build a map table (from a file or the live server). Spawns in batches.
 local function worldName()
@@ -284,6 +311,7 @@ local function forgetWorld(reason)
   custom.forgetWorld()
   state.byId, state.spawnedEntities, state.spawners, state.fills = {}, {}, {}, {}
   state.triggered, state.checkpoints, state.loading = {}, {}, false
+  state.buildJob = nil
   popups = {}
   state.worldId = nil
   if state.live then
@@ -314,33 +342,28 @@ local function buildMap(map, label, out, onDone)
   local objs = map.objects or {}
   local i, okN, failN, fails = 0, 0, 0, {}
   say(out, ('building "%s" — %d objects…'):format((map.meta and map.meta.name) or label, #objs))
-  LoopAsync(cfg.batchDelayMs, function()
-    local done = false
-    ExecuteInGameThread(function()
-      for _ = 1, cfg.batchSize do
-        i = i + 1
-        local o = objs[i]
-        if not o then done = true; break end
-        local ok2, a, err = pcall(spawnObject, o)
-        if ok2 and a then okN = okN + 1; state.byId[o.id] = a
-        else
-          failN = failN + 1
-          local why = ok2 and err or a
-          if why ~= 'host-only' and #fails < 20 then fails[#fails + 1] = (o.asset or '?') .. ' -> ' .. tostring(why) end
-        end
+  state.buildJob = function()
+    for _ = 1, cfg.batchSize do
+      i = i + 1
+      local o = objs[i]
+      if not o then break end
+      local ok2, a, err = pcall(spawnObject, o)
+      if ok2 and a then okN = okN + 1; state.byId[o.id] = a
+      else
+        failN = failN + 1
+        local why = ok2 and err or a
+        if why ~= 'host-only' and #fails < 20 then fails[#fails + 1] = (o.asset or '?') .. ' -> ' .. tostring(why) end
       end
-    end)
-    if done or i > #objs then
-      state.loading = false
+    end
+    if i > #objs then
+      state.buildJob, state.loading = nil, false
       say(out, ('loaded: %d spawned, %d skipped'):format(okN, failN))
       for _, f in ipairs(fails) do log('  skip ' .. f) end
-      startLogic()
       if onDone then onDone() end
-      return true
     end
-    return false
-  end)
+  end
 end
+every(TICK, function() if state.buildJob then state.buildJob() end end)
 
 local function resolveMap(name)
   if not name or name == '' then return nil end
@@ -350,8 +373,8 @@ local function resolveMap(name)
 end
 local function listMaps()
   local t = {}
-  local h = io.popen('dir /b /o-d "' .. MAPS_DIR .. '*.etbrmap" 2>nul')
-  if h then for l in h:lines() do t[#t + 1] = (l:gsub('%.etbrmap$', '')) end; h:close() end
+  local txt = readFile(IO_DIR .. 'maps.txt')
+  if txt then for l in txt:gmatch('[^\r\n]+') do t[#t + 1] = l end end
   return t
 end
 local function loadFile(name, out)
@@ -407,6 +430,8 @@ do
     log = function(m) log(m) end,
     CACHE_DIR = MOD_DIR .. 'cache\\',
     MOD_DIR = MOD_DIR,
+    now = function() return state.now end,
+    hcmd = hcmd,
     offset = function() return state.offset end,
     rotToQuat = rotToQuat,
     players = function()
@@ -427,14 +452,10 @@ do
     addSanity = function(pp, d) pcall(function() local ps = pp.pc.PlayerState; ps.Sanity = math.max(0, math.min(100, (ps.Sanity or 100) + d)) end) end,
   })
 end
-LoopAsync(50, function()
-  ExecuteInGameThread(function()
-    if state.map and not state.loading and checkWorld() then pcall(custom.tickEntities, 0.05) end
-    pcall(custom.tickTimers)
-  end)
-  return false
+every(TICK, function()
+  if state.map and not state.loading and #custom.entities > 0 and checkWorld() then custom.tickEntities(TICK) end
+  custom.tickTimers()
 end)
-LoopAsync(100, function() pcall(custom.drainSounds); return false end)
 RegisterKeyBind(Key[cfg.keyPickup], function() ExecuteInGameThread(function() pcall(custom.tryPickup) end) end)
 RegisterKeyBind(Key[cfg.keyUse], function() ExecuteInGameThread(function() pcall(custom.useHand) end) end)
 RegisterKeyBind(Key[cfg.keyDrop], function() ExecuteInGameThread(function() pcall(custom.dropHand) end) end)
@@ -468,7 +489,7 @@ popup = function(pc, text)
   local a = custom.textActor(vec(loc.X + math.cos(yaw) * 220, loc.Y + math.sin(yaw) * 220, loc.Z + 40), text, 14, '#fff3c4')
   if not a then return end
   a:K2_SetActorRotation({ Pitch = 0, Yaw = rot.Yaw + 180, Roll = 0 }, false) -- face the player
-  popups[#popups + 1] = { a = a, t = os.clock() + 4 }
+  popups[#popups + 1] = { a = a, t = state.now + 4 }
 end
 -- Entity Spawn Areas (host only): each group waits a random min..max seconds, then spawns its
 -- entity at a random spot inside one of its areas (respecting maxAlive), then rolls a new delay.
@@ -520,7 +541,7 @@ function logicTick()
   if not checkWorld() then return end
   local host = isHost()
   local me = localPC()
-  local now = os.clock()
+  local now = state.now
   if host then pcall(spawnerTick, 0.2) end
   for k = #popups, 1, -1 do
     if now > popups[k].t then pcall(function() popups[k].a:K2_DestroyActor() end); table.remove(popups, k) end
@@ -611,34 +632,42 @@ local function urlenc(s) return (tostring(s):gsub('[^%w%-_%.~]', function(ch) re
 
 local function liveTick()
   local L = state.live
-  if not L then return true end -- stops the loop
-  if L.busy or state.loading then return false end
-  L.busy = true
+  if not L or state.loading then return end
+  if L.waiting then
+    local body = readFile(IO_DIR .. 'sync.res')
+    if not body then
+      L.waited = (L.waited or 0) + cfg.livePollMs / 1000
+      if L.waited > 12 then L.waiting, L.waited = false, 0 end
+      return
+    end
+    os.remove(IO_DIR .. 'sync.res')
+    L.waiting, L.waited = false, 0
+    if body == '' then
+      L.fails = (L.fails or 0) + 1
+      if L.fails == 3 then log('live: server not answering (it may be waking up)...') end
+      return
+    end
+    L.fails = 0
+    local ok, res = pcall(json.decode, body)
+    if not ok or type(res) ~= 'table' then return end
+    if res.map then
+      L.rev = res.rev
+      buildMap(res.map, 'live:' .. L.room, nil, function()
+        if not L.started then L.started = true; log('LIVE: level built. Press F6 / etbr start to go to the spawn. Edits appear instantly.') end
+      end)
+    elseif res.ops and #res.ops > 0 then
+      L.rev = res.rev
+      if checkWorld() then pcall(applyOps, res.ops) end
+    else
+      L.rev = res.rev or L.rev
+    end
+    return
+  end
   local url = ('%s/api/room/%s/sync?since=%d&name=%s&color=%s'):format(L.server, L.room, L.rev, urlenc(L.name), urlenc(L.color))
   if L.pose then url = url .. ('&p=%s&yaw=%s&cr=%d'):format(L.pose, L.yaw or 0, L.cr or 0) end
-  local h = io.popen('curl.exe -s -f -m 8 "' .. url .. '"')
-  local body = h and h:read('a') or ''
-  if h then h:close() end
-  L.busy = false
-  if body == '' then L.fails = (L.fails or 0) + 1; if L.fails == 3 then log('live: server not answering (it may be waking up)…') end; return false end
-  L.fails = 0
-  local ok, res = pcall(json.decode, body)
-  if not ok or type(res) ~= 'table' then return false end
-  if res.map then
-    L.rev = res.rev
-    ExecuteInGameThread(function()
-      buildMap(res.map, 'live:' .. L.room, nil, function()
-        if not L.started then L.started = true; log('LIVE — level built. Press F6 / etbr start to go to the spawn. Edits appear instantly.') end
-      end)
-    end)
-  elseif res.ops and #res.ops > 0 then
-    L.rev = res.rev
-    ExecuteInGameThread(function() if checkWorld() then pcall(applyOps, res.ops) end end)
-  else
-    L.rev = res.rev or L.rev
-  end
-  return false
+  if hput('sync.url', url .. '\n') then L.waiting = true; L.waited = 0 end
 end
+every(cfg.livePollMs / 1000, liveTick)
 
 local function goLive(code, out)
   local saved = {}
@@ -650,8 +679,6 @@ local function goLive(code, out)
   unload(false)
   state.live = { room = code, server = (saved.server or cfg.serverUrl):gsub('/$', ''), name = saved.name or 'Player', color = saved.color or '#4fd1ff', rev = -1 }
   say(out, 'going LIVE in room ' .. code .. ' — the first connect can take ~30 s if the server was asleep')
-  startLogic()
-  LoopAsync(cfg.livePollMs, liveTick)
 end
 
 -- ---------- optional low effects (off by default) ----------
@@ -663,18 +690,32 @@ local function lowfx(on, out)
 end
 
 -- ---------- fetch shared map ----------
+local fetching = nil
 local function fetch(code, out)
   code = (code or ''):upper():gsub('[^A-Z0-9]', '')
   if #code ~= 6 then return say(out, 'usage: etbr fetch ABC123') end
-  local file = MAPS_DIR .. code .. '.etbrmap'
-  os.execute('mkdir "' .. MAPS_DIR .. '" 2>nul')
-  say(out, 'downloading ' .. code .. '… (first request can take ~30 s while the server wakes)')
-  local ok = os.execute(('curl.exe -s -f -m 60 -o "%s" "%s/api/room/%s/map"'):format(file, cfg.serverUrl, code))
-  if ok then ExecuteInGameThread(function() loadFile(code, out) end) else say(out, 'download failed — check the code / internet') end
+  if fetching then return say(out, 'already downloading ' .. fetching.code) end
+  say(out, 'downloading ' .. code .. ' (the first request can take ~30 s while the server wakes)')
+  os.remove(IO_DIR .. 'fetch.done')
+  hput('fetch.url', ('%s/api/room/%s/map\n%s%s.etbrmap\n'):format(cfg.serverUrl, code, MAPS_DIR, code))
+  fetching = { code = code, out = out }
 end
+every(0.5, function()
+  if not fetching then return end
+  local r = readFile(IO_DIR .. 'fetch.done')
+  if not r then return end
+  os.remove(IO_DIR .. 'fetch.done')
+  local f = fetching; fetching = nil
+  if r:find('ok') then loadFile(f.code, f.out) else say(f.out, 'download failed: check the code / internet') end
+end)
 
 -- ---------- commands + keys ----------
-local function hasLiveFile() local t = readFile(LIVE_FILE); return t and t:find('"room"') end
+local function hasLiveFile()
+  local t = readFile(LIVE_FILE); if not t then return false end
+  local ok, j = pcall(json.decode, t)
+  if not ok or type(j) ~= 'table' or not j.room or not j.epoch then return false end
+  return os.time() - j.epoch < 6 * 3600 -- written by "Test in game" within the last 6 hours
+end
 local function handle(args, out)
   local sub = (args[1] or 'help'):lower()
   if sub == 'load' then
@@ -732,7 +773,7 @@ end)
 -- Lines written to devcmd.txt run as console commands: "etbr ..." or any Unreal console command after "ue ".
 if readFile(MOD_DIR .. 'dev.enable') then
   log('dev command channel enabled (devcmd.txt)')
-  LoopAsync(500, function()
+  every(0.5, function()
     local txt = readFile(MOD_DIR .. 'devcmd.txt')
     if txt and #txt > 0 then
       os.remove(MOD_DIR .. 'devcmd.txt')
@@ -759,6 +800,8 @@ if readFile(MOD_DIR .. 'dev.enable') then
             end
             log('sig: ' .. tostring(words[2]) .. ' not found')
           end)
+        elseif words[1] == 'perf' then -- perf [seconds]: average FPS + worst frame, measured on the game thread
+          state.perf = { left = tonumber(words[2]) or 5, n = 0, sum = 0, worst = 0, hitches = 0 }
         elseif words[1] == 'entdbg' then -- entdbg move|anim|speed|vel on|off
           custom.dbg[words[2] or ''] = words[3] ~= 'off'; log('entdbg ' .. tostring(words[2]) .. '=' .. tostring(custom.dbg[words[2] or '']))
         elseif words[1] == 'msgtest' then ExecuteInGameThread(function() log('msgtest start'); local pc = localPC(); pcall(popup, pc, table.concat(words, ' ', 2) ~= '' and table.concat(words, ' ', 2) or 'Hello from ETBR'); log('msgtest done') end)
@@ -866,6 +909,33 @@ if readFile(MOD_DIR .. 'dev.enable') then
     end
     return false
   end)
+end
+
+every(TICK, function()
+  local P = state.perf; if not P then return end
+  local dt = statics():GetWorldDeltaSeconds(worldCtx())
+  P.n = P.n + 1; P.sum = P.sum + dt; P.left = P.left - TICK
+  if dt > P.worst then P.worst = dt end
+  if dt > 0.05 then P.hitches = P.hitches + 1 end
+  if P.left <= 0 then
+    state.perf = nil
+    log(('perf: avg %.0f fps, worst frame %.0f ms, %d frames over 50 ms (of %d samples)'):format(P.n / P.sum, P.worst * 1000, P.hitches, P.n))
+  end
+end)
+
+-- start the one scheduler (game thread) and the one helper process
+if LoopInGameThreadWithDelay then
+  LoopInGameThreadWithDelay(33, masterTick)
+else -- older UE4SS: async timer that only ever queues one tick at a time
+  local pending = false
+  LoopAsync(33, function()
+    if not pending then pending = true; ExecuteInGameThread(function() masterTick(); pending = false end) end
+    return false
+  end)
+end
+if package.config:sub(1, 1) == '\\' then
+  local dir = MOD_DIR:gsub('\\$', '')
+  os.execute(('start "" /b powershell -NoProfile -STA -WindowStyle Hidden -ExecutionPolicy Bypass -File "%setbr-helper.ps1" "%s"'):format(MOD_DIR, dir))
 end
 
 log('ETBR Loader ' .. VERSION .. ' ready — maps folder: ' .. MAPS_DIR)

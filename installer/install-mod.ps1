@@ -43,7 +43,7 @@ if (-not (Test-Path (Join-Path $win64 'ue4ss\UE4SS.dll'))) {
 
 # 2) the loader mod (maps/ and live.json are preserved on update)
 $dst = Join-Path $mods 'ETBRLoader'
-New-Item -ItemType Directory -Force -Path (Join-Path $dst 'Scripts'), (Join-Path $dst 'maps') | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $dst 'Scripts'), (Join-Path $dst 'maps'), (Join-Path $dst 'io'), (Join-Path $dst 'cache') | Out-Null
 Copy-Item -Force (Join-Path $Payload 'ETBRLoader\Scripts\*') (Join-Path $dst 'Scripts')
 Get-ChildItem (Join-Path $Payload 'ETBRLoader') -File | ForEach-Object { Copy-Item -Force $_.FullName $dst }  # fontatlas.png etc.
 Write-Output "Installed ETBR Loader to $dst"

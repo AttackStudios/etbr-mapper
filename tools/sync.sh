@@ -3,8 +3,7 @@
 #   tools/sync.sh extractor editor ...
 set -e
 cd "$(dirname "$0")/.."
-PC="${ETBR_PC:-jackpc}"
-KEY="$HOME/.ssh/tidepool_win"
+source "$(dirname "$0")/pcenv.sh"
 for d in "$@"; do
   tar --no-xattrs -czf "/tmp/etbr_sync_$d.tgz" --exclude node_modules --exclude bin --exclude obj --exclude dist "$d"
   scp -q -i "$KEY" "/tmp/etbr_sync_$d.tgz" "$PC:ETBRMapper/_sync_$d.tgz"
