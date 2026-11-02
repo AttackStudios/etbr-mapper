@@ -36,6 +36,7 @@ export const LOGIC_TYPES = [
   { type: 'checkpoint', name: 'Checkpoint', color: '#facc15', desc: 'Respawn here after falling / dying.' },
   { type: 'message', name: 'Message Zone', color: '#c084fc', desc: 'Shows floating text when a player walks in.' },
   { type: 'teleport', name: 'Teleporter', color: '#38bdf8', desc: 'Moves the player to a target point.' },
+  { type: 'cutscene', name: 'Cutscene Zone', color: '#fb923c', desc: 'Walking in plays one of your cutscenes.' },
   { type: 'entityspawn', name: 'Entity Spawn Area', color: '#ff5577', desc: 'An entity appears in one of a group\'s areas at a random time (e.g. every 20–50 s).' },
 ];
 

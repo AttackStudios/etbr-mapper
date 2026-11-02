@@ -9,6 +9,7 @@ import { icon, hydrateIcons, logoMark } from './icons.js';
 import { CustomUI } from './customui.js';
 import { KINDS } from './custom.js';
 import { bakeNav } from './nav.js';
+import { Cutscenes } from './cutscenes.js';
 
 const api = window.etbr;
 const $ = (s, r = document) => r.querySelector(s);
@@ -40,6 +41,7 @@ class App {
     this.clipboard = null;
     this.h = h;
     this.customUI = new CustomUI(this);
+    this.cutscenes = new Cutscenes(this);
   }
 
   // ================================================================ boot
@@ -86,8 +88,8 @@ class App {
     for (const p of this.settings.recent || []) rec.append(h('button', { onclick: () => this.startWith(() => this.openPath(p)) }, icon('file'), ' ' + p.split(/[\\/]/).pop() + '  ', h('span', { class: 'muted small' }, p)));
     const auto = localStorage.getItem('etbr.autosave');
     if (auto) rec.prepend(h('button', { onclick: () => this.startWith(() => this.loadText(auto, null)) }, icon('recover'), ' Recover last unsaved session'));
-    if (this.settings.lastRoom) rec.append(h('button', { onclick: () => this.startWith(() => this.joinRoom(this.settings.lastRoom)) }, icon('people'), ` Rejoin room ${this.settings.lastRoom}`));
-    $('#st-new').onclick = () => this.startWith(() => this.newLevel(true));
+    if (this.settings.lastRoom) rec.append(h('button', { title: 'Reconnects to the last live session you were in', onclick: () => this.startWith(() => this.joinRoom(this.settings.lastRoom)) }, icon('people'), ` Rejoin your last live session (${this.settings.lastRoom})`));
+    $('#st-new').onclick = () => this.startWith(() => this.chooseStarter());
     $('#st-open').onclick = () => this.startWith(() => this.open(), true);
     $('#st-join').onclick = () => this.startWith(() => this.joinDialog(), true);
   }
@@ -103,7 +105,7 @@ class App {
     this.viewport.resize();
     const ok = await fn();
     if (ok === false && keepIfCancel && !this.doc.map.objects.length) this.newLevel(true);
-    if (!this.settings.tutorialDone) setTimeout(() => this.tutorial.start(), 400);
+    if (!this.settings.tutorialDone) setTimeout(() => this.tutorial.start(), 600);
   }
 
   // ================================================================ editor
@@ -173,6 +175,32 @@ class App {
     this.viewport.camera.position.set(10, 8, 12); this.viewport.camYaw = Math.atan2(-10, -12); this.viewport.camPitch = -0.45; this.viewport._applyCamRot();
     return true;
   }
+  // what you see first should make sense: a real room with a spawn and lights, or a deliberately empty level
+  chooseStarter(alreadyNew) {
+    return new Promise((res) => {
+      const pick = async (room) => {
+        close();
+        if (!alreadyNew) await this.newLevel(true);
+        if (room) await this.buildStarterRoom();
+        else this.viewport.focusStarter();
+        res(true);
+      };
+      const close = this.modal('New level', [
+        h('p', {}, 'How do you want to start?'),
+        h('div', { class: 'start-grid', style: 'grid-template-columns:1fr 1fr' },
+          h('button', { class: 'start-tile', onclick: () => pick(true) }, icon('room', 28), h('b', {}, 'Level 0 room'), h('small', {}, 'A lit yellow room with the spawn inside, ready to change. Best for your first level.')),
+          h('button', { class: 'start-tile', onclick: () => pick(false) }, icon('new', 28), h('b', {}, 'Empty level'), h('small', {}, 'Just the grid and the blue player spawn. Build everything yourself.'))),
+      ], []);
+    });
+  }
+  async buildStarterRoom() {
+    const vp = this.viewport, T = vp.camera.position.constructor;
+    await vp.buildRoom(new T(-8, 0, -8), new T(8, 0, 8));
+    this.doc.apply([{ o: 'cfg', k: 'settings', patch: { spawn: { pos: [0, 0, 100], yaw: 0 } } }], { record: false });
+    vp.focusStarter();
+    this.doc.undoStack = []; this.doc.dirty = false;
+    this.toast('Fly with right mouse + WASD. Click Test in game to walk around it.', 5000);
+  }
   async open() {
     if (!(await this.confirmDiscard())) return false;
     const r = await api.file.open(); if (!r) return false;
@@ -214,7 +242,7 @@ class App {
   act(a) {
     const vp = this.viewport;
     switch (a) {
-      case 'new': return this.newLevel();
+      case 'new': return this.newLevel().then((ok) => ok && this.chooseStarter(true));
       case 'open': return this.open();
       case 'save': return this.save();
       case 'export': return this.save(true);
@@ -485,6 +513,11 @@ class App {
         h('p', { class: 'small muted' }, 'Optional: name of a real game level (e.g. Level0, Poolrooms). The host sends everyone there.'));
     }
     if (it.type === 'entityspawn') this.inspectSpawnGroup(el, it, set);
+    if (it.type === 'cutscene') {
+      const list = this.doc.map.settings.cutscenes || [];
+      el.append(h('div', { class: 'field' }, h('span', {}, 'Plays'), h('select', { onchange: (e) => set({ cutscene: e.target.value }, 'Zone cutscene') },
+        h('option', { value: '' }, list.length ? '(choose)' : '(make one in the Cutscenes tab)'), ...list.map((c) => h('option', { value: c.id, selected: it.cutscene === c.id }, c.name)))));
+    }
     if (it.type === 'teleport') {
       el.append(this.vecField('Target', (it.to || it.pos).map((v) => v / 100), 'm', (v) => set({ to: v.map((x) => Math.round(x * 100)) }, 'Teleport target'), 0.5),
         h('button', { class: 'small', onclick: () => { const p = this.viewport.cursorPoint; if (p) set({ to: [Math.round(p.x * 100), Math.round(p.z * 100), Math.round(p.y * 100) + 100] }, 'Teleport target'); } }, icon('crosshair', 13), ' Set target to last mouse point'));
@@ -715,7 +748,8 @@ class App {
   // ================================================================ misc UI
   tab(name) {
     $$('#side-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
-    for (const t of ['inspector', 'outliner', 'level', 'people']) $('#tab-' + t).hidden = t !== name;
+    for (const t of ['inspector', 'outliner', 'level', 'cutscenes', 'people']) $('#tab-' + t).hidden = t !== name;
+    if (name === 'cutscenes') this.cutscenes.render();
     if (name === 'outliner') this.renderOutliner();
     if (name === 'level') this.renderLevel();
     if (name === 'people') this.renderPeople();

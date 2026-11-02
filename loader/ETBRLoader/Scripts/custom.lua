@@ -187,8 +187,9 @@ function M.textActor(loc, text, size, color)
       for k = 1, 4 do norms[b + k] = { X = 1, Y = 0, Z = 0 } end
       uvs[b + 1] = { X = u0, Y = v0 }; uvs[b + 2] = { X = u1, Y = v0 }; uvs[b + 3] = { X = u1, Y = v1 }; uvs[b + 4] = { X = u0, Y = v1 }
       local n = #tris
-      tris[n + 1], tris[n + 2], tris[n + 3] = b, b + 1, b + 2
-      tris[n + 4], tris[n + 5], tris[n + 6] = b, b + 2, b + 3
+      -- winding proven in-game (the reversed order renders inside-out on ProceduralMeshComponent)
+      tris[n + 1], tris[n + 2], tris[n + 3] = b, b + 2, b + 1
+      tris[n + 4], tris[n + 5], tris[n + 6] = b, b + 3, b + 2
     end
     cursor = cursor + w
   end

@@ -91,6 +91,7 @@
       <div id="viewport"></div>
       <div id="mode-banner" hidden></div>
       <div id="room-panel" class="floating" hidden></div>
+      <div id="cut-overlay" hidden><div class="bar top"></div><div class="bar bottom"><span id="cut-caption"></span></div><div id="cut-fade"></div></div>
       <div id="statusbar">
         <span id="st-objects">0 objects</span>
         <span id="st-sel"></span>
@@ -106,11 +107,13 @@
         <button data-tab="inspector" class="on">Inspector</button>
         <button data-tab="outliner">Outliner</button>
         <button data-tab="level">Level</button>
+        <button data-tab="cutscenes">Cutscenes</button>
         <button data-tab="people">People <span id="people-count"></span></button>
       </nav>
       <div class="tab-body" id="tab-inspector"></div>
       <div class="tab-body" id="tab-outliner" hidden></div>
       <div class="tab-body" id="tab-level" hidden></div>
+      <div class="tab-body" id="tab-cutscenes" hidden></div>
       <div class="tab-body" id="tab-people" hidden></div>
     </aside>
   </section>

@@ -72,7 +72,8 @@ function imageToPngB64(img, max = 1024) {
 
 // ---------- three -> Unreal mesh data ----------
 // three (m, Y-up, RH) -> UE (cm, Z-up, LH): (x, z, y) * 100. Triangle order is kept: three's CCW fronts become
-// UE's clockwise fronts after the axis swap (same rule the game-mesh extractor uses).
+// UE's clockwise fronts after the axis swap, but ProceduralMeshComponent shows the OPPOSITE order to cooked meshes
+// (proven in-game with two test cubes), so custom assets store each triangle reversed; the preview flips it back.
 function geometryToSections(geom, materials, matrix, textures, flipV, scale) {
   const g = geom.index ? geom : geom.clone().setIndex([...Array(geom.attributes.position.count).keys()]);
   const pos = g.attributes.position, nor = g.attributes.normal, uv = g.attributes.uv;
@@ -99,6 +100,7 @@ function geometryToSections(geom, materials, matrix, textures, flipV, scale) {
       if (r === undefined) { r = remap.size; remap.set(o, r); v.push(V[o * 3], V[o * 3 + 1], V[o * 3 + 2]); nn.push(N[o * 3], N[o * 3 + 1], N[o * 3 + 2]); uu.push(U[o * 2], U[o * 2 + 1]); }
       ii.push(r);
     }
+    for (let t = 0; t + 2 < ii.length; t += 3) { const x = ii[t + 1]; ii[t + 1] = ii[t + 2]; ii[t + 2] = x; }
     let tex = null;
     if (mat.map?.image) {
       const key = mat.map.uuid;
@@ -198,7 +200,9 @@ function meshObject(asset, meshName) {
     for (let i = 0; i < v.length; i += 3) { P[i] = v[i] / 100; P[i + 1] = v[i + 2] / 100; P[i + 2] = v[i + 1] / 100; Nn[i] = n[i]; Nn[i + 1] = n[i + 2]; Nn[i + 2] = n[i + 1]; }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.BufferAttribute(Nn, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-    g.setIndex(new THREE.BufferAttribute(idx, 1));
+    const flipped = new Uint32Array(idx.length); // stored for ProceduralMeshComponent; three.js needs the other order
+    for (let t = 0; t + 2 < idx.length; t += 3) { flipped[t] = idx[t]; flipped[t + 1] = idx[t + 2]; flipped[t + 2] = idx[t + 1]; }
+    g.setIndex(new THREE.BufferAttribute(flipped, 1));
     const map = previewTexture(asset, s.tex);
     const mat = new THREE.MeshStandardMaterial({ map, color: s.color || '#ffffff', roughness: 0.8, side: THREE.FrontSide });
     if (s.emissive) { mat.emissive.set('#ffffff'); mat.emissiveMap = map; mat.emissiveIntensity = 1.4; }

@@ -183,8 +183,8 @@ export class Viewport extends EventTarget {
     if (!this.spawnObj) {
       this.spawnObj = spawnMarker(); this.spawnObj.userData.id = SPAWN_ID; this.spawnObj.userData.c = 'spawn';
       this.spawnObj.traverse((o) => { o.userData.rootId = SPAWN_ID; });
-      this.world.add(this.spawnObj); this.objects.set(SPAWN_ID, this.spawnObj);
     }
+    if (!this.objects.has(SPAWN_ID)) { this.world.add(this.spawnObj); this.objects.set(SPAWN_ID, this.spawnObj); } // a new level removes it
     // spawn pos is the player's capsule centre (~1 m above floor); marker origin = feet
     ueToThreePos(sp.pos, this.spawnObj.position); this.spawnObj.position.y -= 0.9;
     this.spawnObj.rotation.set(0, -THREE.MathUtils.degToRad(sp.yaw || 0), 0);
@@ -411,6 +411,11 @@ export class Viewport extends EventTarget {
   }
   _applyCamRot() { this.camera.rotation.set(this.camPitch, this.camYaw, 0, 'YXZ'); }
 
+  // first view of a new level: stand back and look at the middle of the world (and inside any room)
+  focusStarter() {
+    this.camera.position.set(0, 14, 16); this.camYaw = 0; this.camPitch = -0.72; this._applyCamRot();
+    this.workY = 0; this.grid.position.y = 0;
+  }
   focusSelection() {
     const objs = this.selection.size ? [...this.selection].map((id) => this.objects.get(id)).filter(Boolean) : [...this.objects.values()];
     if (!objs.length) return;

@@ -263,7 +263,9 @@ end
 -- ---------- load / unload ----------
 local logicTick
 local playerPawns, teleport -- defined further down
+local stopCutscene -- defined with the cutscene player below
 local function unload(out, keepLive)
+  if stopCutscene then stopCutscene() end
   -- bring players back to where they were before the custom level started (else they fall through the void)
   if state.returnPos and out ~= false then
     pcall(function()
@@ -313,6 +315,7 @@ local function forgetWorld(reason)
   state.triggered, state.checkpoints, state.loading = {}, {}, false
   state.buildJob = nil
   popups = {}
+  if stopCutscene then stopCutscene(true) end
   state.worldId = nil
   if state.live then
     state.live.rev = -1; state.live.started = false
@@ -460,6 +463,86 @@ RegisterKeyBind(Key[cfg.keyPickup], function() ExecuteInGameThread(function() pc
 RegisterKeyBind(Key[cfg.keyUse], function() ExecuteInGameThread(function() pcall(custom.useHand) end) end)
 RegisterKeyBind(Key[cfg.keyDrop], function() ExecuteInGameThread(function() pcall(custom.dropHand) end) end)
 
+-- ---------- cutscenes ----------
+-- settings.cutscenes = { { id, name, trigger = 'start'|'zone', keys = { {t, pos, rot, fov} }, captions = { {t, dur, text} }, fadeIn, fadeOut } }
+-- Positions are map-local Unreal cm. Played locally on each machine with a spawned camera.
+local cut = nil
+local function cvarInt(name, fallback)
+  local ok, v = pcall(function() return ksl():GetConsoleVariableIntValue(name) end)
+  return (ok and type(v) == 'number') and v or fallback
+end
+local function camFade(pc, from, to, dur, hold)
+  pcall(function() pc.PlayerCameraManager:StartCameraFade(from, to, dur, { R = 0, G = 0, B = 0, A = 1 }, false, hold) end)
+end
+local function endCutscene()
+  local c = cut; if not c then return end
+  cut = nil
+  pcall(function() if c.caption then c.caption:K2_DestroyActor() end end)
+  local pc = localPC()
+  pcall(function() pc:SetViewTargetWithBlend(pc.Pawn, 0.4, 0, 0, false) end)
+  pcall(function() pc.Pawn:EnableInput(pc) end)
+  pcall(function() if c.fadeOut then camFade(pc, 1, 0, 0.4, false) end end)
+  pcall(function() c.cam:K2_DestroyActor() end)
+  if c.saved then console('r.DepthOfFieldQuality ' .. c.saved.dof); console('r.MotionBlurQuality ' .. c.saved.mb) end
+  log('cutscene finished: ' .. tostring(c.def.name))
+end
+local function playCutscene(def)
+  if cut or not def or not def.keys or #def.keys == 0 then return end
+  local pc = localPC(); if not pc then return end
+  table.sort(def.keys, function(a, b) return (a.t or 0) < (b.t or 0) end)
+  local k = def.keys[1]
+  local camActor = spawn(findObj(classCache, '/Script/Engine.CameraActor'), W(k.pos))
+  if not camActor then log('cutscene: could not create a camera'); return end
+  cut = { def = def, cam = camActor, t = 0, len = def.keys[#def.keys].t or 0, fadeIn = (def.fadeIn or 0) > 0, fadeOut = (def.fadeOut or 0) > 0 }
+  -- the game's depth of field + motion blur smear a spawned camera's view and make captions unreadable
+  cut.saved = { dof = cvarInt('r.DepthOfFieldQuality', 2), mb = cvarInt('r.MotionBlurQuality', 4) }
+  console('r.DepthOfFieldQuality 0'); console('r.MotionBlurQuality 0')
+  pcall(function() pc.Pawn:DisableInput(pc) end)
+  pcall(function() pc:SetViewTargetWithBlend(camActor, 0, 0, 0, false) end)
+  if cut.fadeIn then camFade(pc, 1, 0, def.fadeIn, false) end
+  log('cutscene playing: ' .. tostring(def.name))
+end
+local function lerpAngle(a, b, f) local d = ((b - a + 540) % 360) - 180; return a + d * f end
+every(TICK, function()
+  local c = cut; if not c then return end
+  if not state.map then return endCutscene() end
+  c.t = c.t + TICK
+  local keys = c.def.keys
+  local a, b = keys[1], keys[#keys]
+  for i = 1, #keys - 1 do if c.t >= keys[i].t and c.t <= keys[i + 1].t then a, b = keys[i], keys[i + 1]; break end end
+  local span = math.max(0.001, (b.t or 0) - (a.t or 0))
+  local f = math.max(0, math.min(1, (c.t - (a.t or 0)) / span))
+  f = f * f * (3 - 2 * f) -- ease in and out of every shot
+  local p = { a.pos[1] + (b.pos[1] - a.pos[1]) * f, a.pos[2] + (b.pos[2] - a.pos[2]) * f, a.pos[3] + (b.pos[3] - a.pos[3]) * f }
+  local rot = { Pitch = lerpAngle(a.rot[1], b.rot[1], f), Yaw = lerpAngle(a.rot[2], b.rot[2], f), Roll = lerpAngle(a.rot[3] or 0, b.rot[3] or 0, f) }
+  local w = W(p)
+  pcall(function() c.cam:K2_SetActorLocation(w, false, {}, true) end)
+  pcall(function() c.cam:K2_SetActorRotation(rot, false) end)
+  local fov = (a.fov or 90) + ((b.fov or 90) - (a.fov or 90)) * f
+  if not c.fov or math.abs(c.fov - fov) > 0.1 then c.fov = fov; pcall(function() c.cam.CameraComponent:SetFieldOfView(fov) end) end
+  -- caption: a glyph-mesh sign kept in front of the camera
+  local now
+  for _, cp in ipairs(c.def.captions or {}) do if c.t >= (cp.t or 0) and c.t < (cp.t or 0) + (cp.dur or 3) then now = cp; break end end
+  if now ~= c.capDef then
+    pcall(function() if c.caption then c.caption:K2_DestroyActor() end end)
+    c.caption, c.capDef = nil, now
+    if now then c.caption = custom.textActor(w, now.text or '', 22, '#ffffff') end
+  end
+  if c.caption then
+    local yaw, pitch = math.rad(rot.Yaw), math.rad(rot.Pitch)
+    local fx, fy, fz = math.cos(pitch) * math.cos(yaw), math.cos(pitch) * math.sin(yaw), math.sin(pitch)
+    pcall(function() c.caption:K2_SetActorLocation(vec(w.X + fx * 400, w.Y + fy * 400, w.Z + fz * 400 - 120), false, {}, true) end)
+    pcall(function() c.caption:K2_SetActorRotation({ Pitch = -rot.Pitch, Yaw = rot.Yaw + 180, Roll = 0 }, false) end)
+  end
+  local fo = c.def.fadeOut or 0
+  if fo > 0 and not c.fadingOut and c.t >= c.len - fo then c.fadingOut = true; camFade(localPC(), 0, 1, fo, true) end
+  if c.t >= c.len then endCutscene() end
+end)
+stopCutscene = function(worldGone) if worldGone then cut = nil else endCutscene() end end
+local function cutsceneById(id)
+  for _, c in ipairs(((state.map or {}).settings or {}).cutscenes or {}) do if c.id == id or c.name == id then return c end end
+end
+
 local function start(out)
   if not state.map then return say(out, 'no map loaded — etbr load <name> or etbr live first') end
   state.returnPos = state.returnPos or {}
@@ -469,10 +552,12 @@ local function start(out)
   if isHost() then
     for i, pp in ipairs(playerPawns()) do local l, r = spawnPoint(i - 1); teleport(pp, l, r) end
     say(out, 'started — everyone teleported to the spawn')
+    for _, c in ipairs((state.map.settings or {}).cutscenes or {}) do if c.trigger == 'start' then playCutscene(c); break end end
   else
     local pc = localPC()
     if pc and pc.Pawn and pc.Pawn:IsValid() then local l, r = spawnPoint(0); teleport({ pc = pc, pawn = pc.Pawn }, l, r) end
     say(out, 'teleported to spawn (the host should run  etbr start)')
+    for _, c in ipairs((state.map.settings or {}).cutscenes or {}) do if c.trigger == 'start' then playCutscene(c); break end end
   end
 end
 
@@ -561,7 +646,8 @@ function logicTick()
         local isIn = inside(p, l)
         if isIn and not state.triggered[tk] then
           state.triggered[tk] = true
-          if l.type == 'message' and mine then popup(pp.pc, l.text or '')
+          if l.type == 'cutscene' and mine then playCutscene(cutsceneById(l.cutscene))
+          elseif l.type == 'message' and mine then popup(pp.pc, l.text or '')
           elseif l.type == 'checkpoint' then state.checkpoints[key] = W(l.pos); if mine then popup(pp.pc, 'Checkpoint') end
           elseif l.type == 'kill' and host then
             local cp = state.checkpoints[key]
@@ -800,6 +886,13 @@ if readFile(MOD_DIR .. 'dev.enable') then
             end
             log('sig: ' .. tostring(words[2]) .. ' not found')
           end)
+        elseif words[1] == 'cut' then playCutscene(cutsceneById(table.concat(words, ' ', 2)) or ((state.map.settings or {}).cutscenes or {})[1])
+        elseif words[1] == 'sndtest' then
+          local e = custom.entities[1]
+          if e then
+            local nm = next(e.asset.sounds or {})
+            log('sndtest playing ' .. tostring(nm)); custom.playSound(e.asset, nm, e.actor, false, 1)
+          else log('sndtest: no entity') end
         elseif words[1] == 'perf' then -- perf [seconds]: average FPS + worst frame, measured on the game thread
           state.perf = { left = tonumber(words[2]) or 5, n = 0, sum = 0, worst = 0, hitches = 0 }
         elseif words[1] == 'entdbg' then -- entdbg move|anim|speed|vel on|off

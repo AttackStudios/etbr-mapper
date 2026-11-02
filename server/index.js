@@ -206,7 +206,7 @@ function json(res, code, body) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   if (req.method === 'OPTIONS') return json(res, 204, {});
-  if (url.pathname === '/health' || url.pathname === '/') return json(res, 200, { ok: true, service: 'etbr-collab', rooms: rooms.size, persist: !!REST_URL });
+  if (url.pathname === '/health' || url.pathname === '/') return json(res, 200, { ok: true, service: 'etbr-collab', version: 2, rooms: rooms.size, persist: !!REST_URL });
   let m;
   if ((m = url.pathname.match(/^\/api\/room\/([A-Za-z0-9]{6})(\/map)?$/)) && req.method === 'GET') {
     const room = await getRoom(m[1]);

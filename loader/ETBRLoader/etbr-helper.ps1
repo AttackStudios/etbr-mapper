@@ -92,6 +92,12 @@ while ($true) {
     }
   }
 
+  # ---- dev only: report what is playing (dev.enable is never shipped)
+  if ($n % 65 -eq 0 -and (Test-Path -LiteralPath (Join-Path $Dir 'dev.enable'))) {
+    $rows = foreach ($k in $players.Keys) { $m = $players[$k].m; "$k pos=$($m.Position.TotalSeconds) len=$(if ($m.NaturalDuration.HasTimeSpan) { $m.NaturalDuration.TimeSpan.TotalSeconds } else { '?' }) vol=$($m.Volume) failed=$($m.HasAudio)" }
+    Put 'stat.txt' ("players=$($players.Count)`n" + ($rows -join "`n"))
+  }
+
   # ---- map list
   if ($n % 130 -eq 5) {
     $list = (Get-ChildItem $maps -Filter '*.etbrmap' | Sort-Object LastWriteTime -Descending | ForEach-Object { $_.BaseName }) -join "`n"

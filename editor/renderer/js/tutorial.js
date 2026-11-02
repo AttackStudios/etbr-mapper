@@ -5,7 +5,7 @@ const STEPS = [
   { sel: '#viewport', title: '3 · Fly around', text: 'Hold the RIGHT mouse button and use W A S D to fly (Q/E down/up). Scroll to zoom toward the mouse. Press F to jump to what you selected.', side: 'center' },
   { sel: '#tools', title: '4 · Move, turn, resize', text: 'Click an object, then drag the coloured arrows. W = move, E = rotate, R = scale. Snapping keeps everything lined up — G toggles it.', side: 'below' },
   { sel: '#tools [data-tool=room]', title: '5 · Build rooms in one drag', text: 'The Room tool (B) builds floor, walls, ceiling and lights from the real Level 0 pieces. Drag a rectangle — done. Ctrl+Z if you don\'t like it.', side: 'below' },
-  { sel: '#pal-cats', title: '6 · Make it a level', text: 'Open “Logic” to place the Player Spawn, an Exit Zone, checkpoints and death zones. Entities & Items have the monsters and almond water.', side: 'right' },
+  { sel: '#pal-cats', title: '6 · Make it a level', text: 'Open “Logic” to place the Player Spawn, an Exit Zone, checkpoints and death zones. Entities & Items have the monsters and almond water. Custom holds your own imports, and the Cutscenes tab makes camera scenes.', side: 'right' },
   { sel: '#btn-collab', title: '7 · Build with friends', text: 'Start a live session and send the 6-letter code — you\'ll see each other\'s cursors and edits instantly.', side: 'below' },
   { sel: '[data-act=play]', title: '8 · Play it!', text: 'Click Play in game to install your level, then press F7 in Escape the Backrooms. Export .etbrmap to send the file to anyone.', side: 'below' },
 ];

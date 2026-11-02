@@ -159,6 +159,15 @@ button .ic { margin-right: 1px; }
 .seg button { flex: 1; padding: 10px; }
 textarea.code { width: 100%; font: 12px/1.45 Consolas, monospace; background: #0c0b07; color: #e9e2c6; }
 
+/* ---------- cutscene preview ---------- */
+#cut-overlay { position: absolute; inset: 0 0 26px 0; pointer-events: none; z-index: 5; }
+#cut-overlay .bar { position: absolute; left: 0; right: 0; height: 9%; background: #000; display: grid; place-items: center; }
+#cut-overlay .top { top: 0; } #cut-overlay .bottom { bottom: 0; color: #fff; font-size: 18px; }
+#cut-fade { position: absolute; inset: 0; background: #000; opacity: 0; }
+.shot { display: grid; grid-template-columns: 22px 70px 1fr auto; gap: 6px; align-items: center; padding: 4px 0; }
+.shot input[type=number] { width: 100%; }
+.shot.cap { grid-template-columns: 58px 58px 1fr auto; }
+
 /* ---------- tutorial ---------- */
 .tut-ring { position: fixed; border: 2px solid var(--accent); border-radius: 12px; box-shadow: 0 0 0 9999px rgba(0,0,0,.55), 0 0 24px rgba(242,212,92,.6); pointer-events: none; z-index: 70; transition: all .25s; }
 .tut-card { position: fixed; z-index: 71; width: 330px; background: var(--panel); border: 1px solid var(--accent2); border-radius: 14px; padding: 16px 18px; box-shadow: 0 20px 60px rgba(0,0,0,.6); transition: all .25s; }
