@@ -2,7 +2,8 @@
 -- Meshes are built at runtime with ProceduralMeshComponent; textures are loaded from PNG with
 -- ImportFileAsTexture2D and shown through a dynamic instance of the game's own M_Master material.
 local M = {}
-local atlasTex -- font atlas texture (see text section)
+local paletteTex -- text colours (see text section)
+local prompt = nil -- pick-up sign
 local SMA = '/Script/Engine.StaticMeshActor'
 
 -- ---------- base64 ----------
@@ -51,7 +52,7 @@ end
 
 -- ---------- textures (cached per asset+name, written once to the mod's cache folder) ----------
 local texCache = {}
-function M.forgetWorld() texCache = {}; atlasTex = nil; if M.forgetAll then M.forgetAll() end end
+function M.forgetWorld() texCache = {}; paletteTex = nil; if M.forgetAll then M.forgetAll() end end
 local function texture(asset, name)
   if not name or not asset.textures or not asset.textures[name] then return nil end
   local key = asset.id .. '/' .. name
@@ -74,8 +75,9 @@ local function texture(asset, name)
 end
 
 local MASTER = '/Game/Backrooms/Materials/M_Master.M_Master'
+local GLOW = '/Game/Backrooms/Materials/MI_FluorescentLamp.MI_FluorescentLamp' -- M_Master child with emissive switched on
 local function applyMaterial(comp, idx, asset, sec)
-  local master = E.findObj(MASTER)
+  local master = (sec.emissive or 0) > 0 and E.findObj(GLOW) or E.findObj(MASTER)
   if not master then return end
   local ok, mid = pcall(function() return comp:CreateDynamicMaterialInstance(idx, master, FName('None')) end)
   if not ok or not mid then E.log('custom: material failed ' .. tostring(mid)); return end
@@ -150,61 +152,89 @@ end
 
 
 -- ======================================================================== text (no FText!)
--- Passing FText to Unreal crashes this UE4SS build (found in-game), so text is drawn as a
--- ProceduralMesh of glyph quads cut from fontatlas.png (16x6 grid, ASCII 32..127).
+-- Passing FText to Unreal crashes this UE4SS build (found in-game), so text is a ProceduralMesh
+-- of real rectangles per glyph (fontglyphs.lua): no background box, readable in the dark because
+-- the lamp material glows. Colour comes from where the UVs land on palette.png.
 local WIDTHS = require('fontwidths')
-local function atlas()
-  if atlasTex and pcall(function() return atlasTex:IsValid() end) and atlasTex:IsValid() then return atlasTex end
-  local ok, t = pcall(function() return StaticFindObject('/Script/Engine.Default__KismetRenderingLibrary'):ImportFileAsTexture2D(E.world(), E.MOD_DIR .. 'fontatlas.png') end)
-  atlasTex = ok and t or nil
-  return atlasTex
+local GLYPHS = require('fontglyphs')
+local function palette()
+  if paletteTex and pcall(function() return paletteTex:IsValid() end) and paletteTex:IsValid() then return paletteTex end
+  local ok, t = pcall(function() return StaticFindObject('/Script/Engine.Default__KismetRenderingLibrary'):ImportFileAsTexture2D(E.world(), E.MOD_DIR .. 'palette.png') end)
+  paletteTex = ok and t or nil
+  return paletteTex
 end
--- builds text into a new actor at loc; the text faces the actor's +X (rotate the actor to aim it)
-function M.textActor(loc, text, size, color)
+local function paletteUV(hex)
+  local r, g, b = tostring(hex or '#fff3c4'):match('#?(%x%x)(%x%x)(%x%x)')
+  r, g, b = tonumber(r or 'ff', 16), tonumber(g or 'f3', 16), tonumber(b or 'c4', 16)
+  local q = function(v) return math.floor(v / 51 + 0.5) end
+  return (q(r) * 6 + q(g) + 0.5) / 36, (q(b) + 0.5) / 6
+end
+local function textWidth(line, size)
+  local w = 0
+  for i = 1, #line do w = w + (WIDTHS[line:byte(i) - 31] or 32) / 64 * size end
+  return w
+end
+-- split on newlines, then wrap at spaces so no line is wider than maxWidth (cm)
+local function layoutLines(text, size, maxWidth)
+  local lines = {}
+  for para in (text .. '\n'):gmatch('(.-)\n') do
+    local cur = ''
+    for word in para:gmatch('%S+') do
+      local try = cur == '' and word or (cur .. ' ' .. word)
+      if maxWidth and cur ~= '' and textWidth(try, size) > maxWidth then lines[#lines + 1] = cur; cur = word else cur = try end
+    end
+    lines[#lines + 1] = cur
+  end
+  return lines
+end
+-- builds text into a new actor at loc; the text faces the actor's +X (rotate the actor to aim it).
+-- maxWidth (cm, optional) wraps long text; a newline always starts a new line.
+function M.textActor(loc, text, size, color, maxWidth)
   size = size or 30
-  text = tostring(text or ''):gsub('[^\32-\126]', '?')
-  if #text == 0 then return nil end
+  text = tostring(text or ''):gsub('\r', ''):gsub('[^\10\32-\126]', '?')
+  if not text:find('%S') then return nil end
   if not PMC or not PMC:IsValid() then PMC = StaticFindObject('/Script/ProceduralMeshComponent.ProceduralMeshComponent') end
   local a = E.spawn(E.findClass(SMA), loc)
   if not a then return nil end
   pcall(function() a.StaticMeshComponent:SetMobility(2); a:SetActorEnableCollision(false) end)
   local verts, tris, norms, uvs = {}, {}, {}, {}
-  local total = 0
-  for i = 1, #text do total = total + (WIDTHS[text:byte(i) - 31] or 32) / 64 * size end
-  local cursor, half = -total / 2, size / 2
-  for i = 1, #text do
-    local code = text:byte(i) - 32
-    local w = (WIDTHS[code + 1] or 32) / 64 * size
-    if code ~= 0 then
-      local col, row = code % 16, code // 16
-      local cellW = (WIDTHS[code + 1] or 32) / 64 -- glyphs are centred in their 64px cell
-      local u0 = (col + 0.5 - cellW / 2) / 16; local u1 = (col + 0.5 + cellW / 2) / 16
-      local v0, v1 = row / 6, (row + 1) / 6
-      local b = #verts
-      -- reading direction is -Y when seen from +X (Unreal: forward X, right Y)
-      verts[b + 1] = { X = 0, Y = -cursor, Z = half }; verts[b + 2] = { X = 0, Y = -(cursor + w), Z = half }
-      verts[b + 3] = { X = 0, Y = -(cursor + w), Z = -half }; verts[b + 4] = { X = 0, Y = -cursor, Z = -half }
-      for k = 1, 4 do norms[b + k] = { X = 1, Y = 0, Z = 0 } end
-      uvs[b + 1] = { X = u0, Y = v0 }; uvs[b + 2] = { X = u1, Y = v0 }; uvs[b + 3] = { X = u1, Y = v1 }; uvs[b + 4] = { X = u0, Y = v1 }
-      local n = #tris
-      -- winding proven in-game (the reversed order renders inside-out on ProceduralMeshComponent)
-      tris[n + 1], tris[n + 2], tris[n + 3] = b, b + 2, b + 1
-      tris[n + 4], tris[n + 5], tris[n + 6] = b, b + 3, b + 2
+  local u, v = paletteUV(color)
+  local px, nv, nt = size / 64, 0, 0
+  local lines = layoutLines(text, size, maxWidth)
+  local lineH = size * 1.15
+  for li, line in ipairs(lines) do
+    local cursor = -textWidth(line, size) / 2
+    local top = (#lines - 1) * lineH / 2 - (li - 1) * lineH + size / 2 -- block is centred on the actor
+    for i = 1, #line do
+      local code = line:byte(i) - 31
+      local r = GLYPHS[code] or {}
+      for k = 1, #r, 4 do
+        local y0, y1 = -(cursor + r[k] * px), -(cursor + r[k + 2] * px)
+        local z0, z1 = top - r[k + 1] * px, top - r[k + 3] * px
+        -- reading direction is -Y when seen from +X (Unreal: forward X, right Y)
+        verts[nv + 1] = { X = 0, Y = y0, Z = z0 }; verts[nv + 2] = { X = 0, Y = y1, Z = z0 }
+        verts[nv + 3] = { X = 0, Y = y1, Z = z1 }; verts[nv + 4] = { X = 0, Y = y0, Z = z1 }
+        for n = 1, 4 do norms[nv + n] = { X = 1, Y = 0, Z = 0 }; uvs[nv + n] = { X = u, Y = v } end
+        -- winding proven in-game (the reversed order renders inside-out on ProceduralMeshComponent)
+        tris[nt + 1], tris[nt + 2], tris[nt + 3] = nv, nv + 2, nv + 1
+        tris[nt + 4], tris[nt + 5], tris[nt + 6] = nv, nv + 3, nv + 2
+        nv, nt = nv + 4, nt + 6
+      end
+      cursor = cursor + (WIDTHS[code] or 32) * px
     end
-    cursor = cursor + w
   end
   local t = { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Translation = { X = 0, Y = 0, Z = 0 }, Scale3D = { X = 1, Y = 1, Z = 1 } }
   local comp = a:AddComponentByClass(PMC, false, t, false)
   if not comp then pcall(function() a:K2_DestroyActor() end); return nil end
   pcall(function() comp:CreateMeshSection_LinearColor(0, verts, tris, norms, uvs, {}, {}, {}, {}, {}, false) end)
-  local master = E.findObj(MASTER)
-  if master then
+  local mat = E.findObj(GLOW) or E.findObj(MASTER)
+  if mat then
     pcall(function()
-      local mid = comp:CreateDynamicMaterialInstance(0, master, FName('None'))
-      local tex = atlas()
+      local mid = comp:CreateDynamicMaterialInstance(0, mat, FName('None'))
+      local tex = palette()
       if tex then mid:SetTextureParameterValue(FName('BaseColor'), tex); mid:SetTextureParameterValue(FName('Emissive'), tex) end
-      mid:SetVectorParameterValue(FName('BaseColorMultiplier'), hexColor(color or '#fff3c4'))
-      mid:SetScalarParameterValue(FName('EmissiveMultiplier'), 4)
+      mid:SetVectorParameterValue(FName('BaseColorMultiplier'), hexColor('#ffffff'))
+      mid:SetScalarParameterValue(FName('EmissiveMultiplier'), 3)
     end)
   end
   return a
@@ -526,7 +556,8 @@ function M.tickEntities(dt)
       if not frozen and M.dbg.move then
         if target and (mode ~= 'wander' or td < (b.sight or 2500) * 0.5) then
           speed = b.runSpeed or 520
-          moved = walkToward(e, target.pawn:K2_GetActorLocation(), speed, dt)
+          -- stop just short of the player: a harmless entity must not stand inside your camera
+          if td > math.max(90, (b.killRange or 130) * 0.7) then moved = walkToward(e, target.pawn:K2_GetActorLocation(), speed, dt) end
         elseif mode ~= 'static' then
           e.wanderT = (e.wanderT or 0) - dt
           if not e.wander or e.wanderT <= 0 or vdist(me, e.wander) < 80 then
@@ -576,10 +607,21 @@ function M.spawnItem(asset, loc)
   M.items[#M.items + 1] = entry
   return a
 end
-local function dropHand()
+local function dropHand(placeOnGround)
   if not hand then return end
   pcall(function() hand.actor:K2_DestroyActor() end)
+  if hand.light then pcall(function() hand.light:K2_DestroyActor() end) end
+  local src = hand.src
   hand = nil
+  if placeOnGround and src then
+    pcall(function()
+      local pp = E.localPlayer()
+      local p = pp.pawn:K2_GetActorLocation(); local yaw = math.rad(pp.pc:GetControlRotation().Yaw)
+      src.actor:K2_SetActorLocation({ X = p.X + math.cos(yaw) * 130, Y = p.Y + math.sin(yaw) * 130, Z = p.Z - 85 }, false, {}, true)
+      src.actor:SetActorHiddenInGame(false); src.actor:SetActorEnableCollision(true)
+      src.taken = false
+    end)
+  end
 end
 -- E near a custom item: pick it up into the hand slot (attached to the first-person camera)
 function M.tryPickup()
@@ -594,7 +636,8 @@ function M.tryPickup()
   local it = M.items[best]
   it.taken = true
   pcall(function() it.actor:SetActorHiddenInGame(true); it.actor:SetActorEnableCollision(false) end)
-  dropHand()
+  dropHand(true) -- swapping items puts the old one down
+  M.clearPrompt()
   local h = it.asset.item.hand or {}
   local a = E.spawn(E.findClass(SMA), mp)
   if not a then return false end
@@ -633,11 +676,41 @@ function M.useHand()
   elseif u.type == 'script' then hook(hand.src.env, 'onUse', { _pp = pp }) end
   if u.consume and u.type ~= 'light' then dropHand() end
 end
-function M.dropHand() dropHand() end
+function M.dropHand() dropHand(true) end
+
+-- "E: pick up X" sign while you stand near a custom item
+function M.clearPrompt() if prompt then pcall(function() prompt.actor:K2_DestroyActor() end); prompt = nil end end
+function M.tickPrompts()
+  local me = E.localPawn(); if not me then return M.clearPrompt() end
+  local mp = me:K2_GetActorLocation()
+  local best, bd
+  for _, it in ipairs(M.items) do
+    if not it.taken then
+      local ok, p = pcall(function() return it.actor:K2_GetActorLocation() end)
+      if ok and p then local d = vdist(mp, p); if d < 220 and (not bd or d < bd) then best, bd = it, d end end
+    end
+  end
+  if not best then return M.clearPrompt() end
+  local p = best.actor:K2_GetActorLocation()
+  if not prompt or prompt.item ~= best then
+    M.clearPrompt()
+    local nm = (best.asset.item.pickupText ~= nil and best.asset.item.pickupText ~= '') and best.asset.item.pickupText or best.asset.name
+    local a = M.textActor({ X = p.X, Y = p.Y, Z = mp.Z + 45 }, 'E: pick up ' .. nm, 9, '#fff3c4')
+    if a then prompt = { actor = a, item = best } end
+  end
+  if prompt then
+    -- keep it readable: at eye level, slightly in front of the item, always facing the player
+    local yaw = math.deg(math.atan(mp.Y - p.Y, mp.X - p.X))
+    pcall(function()
+      prompt.actor:K2_SetActorLocation({ X = p.X, Y = p.Y, Z = mp.Z + 45 }, false, {}, true)
+      prompt.actor:K2_SetActorRotation({ Pitch = 0, Yaw = yaw, Roll = 0 }, false)
+    end)
+  end
+end
 
 function M.forgetAll()
   for _, e in ipairs(M.entities) do M.stopSound(e.idleSound) end
-  M.entities, M.items, hand, timers = {}, {}, nil, {}
+  M.entities, M.items, hand, timers, prompt = {}, {}, nil, {}, nil
 end
 
 return M

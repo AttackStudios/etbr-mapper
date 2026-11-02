@@ -17,7 +17,7 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'etbrlib', privileges: { standar
 // ---------- settings ----------
 function readSettings() {
   let s = {};
-  try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); } catch {}
+  try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8').replace(/^\uFEFF/, '')); } catch {} // tolerate a BOM from hand edits
   return Object.assign({ serverUrl: DEFAULT_SERVER, name: '', color: '', gameDir: '', recent: [], tutorialDone: false }, s);
 }
 function writeSettings(patch) {

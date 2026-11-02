@@ -126,7 +126,15 @@ export class CustomUI {
       asset.meshes = conv.meshes; asset.textures = conv.textures;
       const first = Object.keys(conv.meshes)[0] || 'body';
       if (asset.kind === 'object') asset.object.mesh = first;
-      if (asset.kind === 'item') { asset.item.ground.mesh = first; if (!asset.item.hand.custom) asset.item.hand.mesh = first; }
+      if (asset.kind === 'item') {
+        asset.item.ground.mesh = first;
+        if (!asset.item.hand.custom) asset.item.hand.mesh = first;
+        // whatever size the model is, it starts out fitting in the hand (about 18 cm)
+        const sz = new THREE.Box3().setFromObject(model.scene).getSize(new THREE.Vector3());
+        const longest = Math.max(sz.x, sz.y, sz.z) * st.scale;
+        const s = longest > 0 ? Math.min(1, Math.round((0.18 / longest) * 1000) / 1000) : 1;
+        asset.item.hand.scale = [s, s, s];
+      }
       if (asset.kind === 'entity') {
         asset.entity.parts = conv.parts; asset.entity.anims = conv.anims; st.clipNames = conv.clipNames;
         const guess = (re) => conv.clipNames.find((c) => re.test(c)) || '';
@@ -220,7 +228,8 @@ export class CustomUI {
           u.type === 'light' ? field('Light', h('div', {}, num(u.light.intensity, (v) => (u.light.intensity = v), 250, 0), ' brightness  ', num(u.light.range / 100, (v) => (u.light.range = v * 100), 1, 1), ' m range')) : null,
           u.type === 'sanity' || u.type === 'stamina' ? field('Amount', num(u.amount, (v) => (u.amount = v), 5, 0)) : null,
           field('', h('label', { class: 'row', style: 'align-items:center' }, cons, ' Used up after one use')),
-          field('In hand (cm)', vec(it.hand.pos), 'forward, right, up — relative to the camera')));
+          field('In hand (cm)', vec(it.hand.pos), 'forward, right, up — relative to the camera'),
+          field('Size in hand (%)', num(Math.round(it.hand.scale[0] * 1000) / 10, (v) => { const s = v / 100; it.hand.scale = [s, s, s]; }, 5, 1))));
       }
       // script
       const code = h('textarea', { class: 'code', rows: 8, spellcheck: false }, asset.scripts['main.lua'] || '');

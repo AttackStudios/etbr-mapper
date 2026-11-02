@@ -219,7 +219,9 @@ class App {
   }
   // entities in the level need the walk grid (baked here from the real scene, shipped inside the map)
   updateNav() {
-    const hasEnt = this.doc.map.objects.some((o) => o.kind === 'custom' && this.catalog.get(o.asset)?.customKind === 'entity');
+    const groups = Object.values(this.doc.map.settings.spawnGroups || {});
+    const hasEnt = this.doc.map.objects.some((o) => o.kind === 'custom' && this.catalog.get(o.asset)?.customKind === 'entity')
+      || groups.some((g) => this.catalog.get(g.entity)?.customKind === 'entity');
     if (!hasEnt) { if (this.doc.map.settings.nav) this.doc.apply([{ o: 'cfg', k: 'settings', patch: { nav: null } }], { record: false }); return; }
     const t0 = performance.now();
     const nav = bakeNav(this.viewport, this.doc);
@@ -545,8 +547,8 @@ class App {
     } });
     for (const name of [...new Set([g, ...Object.keys(groups)])]) gsel.append(h('option', { value: name, selected: name === g }, name));
     gsel.append(h('option', { value: '__new' }, '+ New group…'));
-    const ents = this.catalog.items.filter((i) => i.cat === 'entities').sort((a, b) => a.name.localeCompare(b.name));
-    const esel = h('select', { onchange: (e) => setG({ entity: e.target.value }) });
+    const ents = this.catalog.items.filter((i) => i.cat === 'entities' || i.customKind === 'entity').sort((a, b) => a.name.localeCompare(b.name));
+    const esel = h('select', { onchange: (e) => { if (this.catalog.get(e.target.value)?.kind === 'custom') this.customUI.ensureInMap(e.target.value); setG({ entity: e.target.value }); } });
     for (const e of ents) esel.append(h('option', { value: e.id, selected: e.id === G.entity }, e.name));
     el.append(h('div', { class: 'sec' }, h('h4', {}, 'Spawn group'),
       h('div', { class: 'field' }, h('span', {}, 'Group'), gsel),

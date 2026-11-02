@@ -180,3 +180,5 @@ textarea.code { width: 100%; font: 12px/1.45 Consolas, monospace; background: #0
 /* keep the toolbar on one line on narrower windows: secondary buttons go icon-only (tooltips keep the names) */
 @media (max-width: 1700px) { #topbar .lbl { display: none; } #topbar button { padding: 6px 8px; } .level-name { width: 150px; } }
 @media (max-width: 1300px) { .level-name { width: 110px; } .snap { font-size: 0; } }
+.shot.cap { display: grid; grid-template-columns: 52px 52px minmax(0, 1fr) 28px; gap: 6px; align-items: center; }
+.shot.cap input { min-width: 0; width: 100%; box-sizing: border-box; }

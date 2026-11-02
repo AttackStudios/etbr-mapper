@@ -77,7 +77,7 @@ export class Cutscenes {
       caps.append(h('div', { class: 'shot cap' }, num(cp.t || 0, (v) => this.update((x) => (x.captions[i].t = v)), 0.5), num(cp.dur || 3, (v) => this.update((x) => (x.captions[i].dur = v)), 0.5), txt,
         h('button', { class: 'small danger', onclick: () => this.update((x) => x.captions.splice(i, 1)) }, icon('close', 12))));
     });
-    if ((c.captions || []).length) caps.prepend(h('div', { class: 'muted small' }, 'start (s) · length (s) · text'));
+    if ((c.captions || []).length) caps.firstChild.after(h('div', { class: 'muted small' }, 'start (s) · length (s) · text'));
     caps.append(h('button', { class: 'small', onclick: () => this.update((x) => { x.captions = x.captions || []; const l = x.captions[x.captions.length - 1]; x.captions.push({ t: l ? l.t + l.dur : 0, dur: 3, text: 'Caption' }); }) }, icon('plus', 13), ' Add caption'));
     el.append(caps,
       h('div', { class: 'sec' }, h('button', { class: 'danger', onclick: () => this.save(this.list().filter((x) => x.id !== c.id)) }, icon('trash', 14), ' Delete cutscene')));

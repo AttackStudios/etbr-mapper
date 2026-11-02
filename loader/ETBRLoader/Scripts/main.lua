@@ -17,7 +17,7 @@ local json = require('json')
 local cfg = require('config')
 local custom = require('custom')
 
-local VERSION = '1.3.0'
+local VERSION = '1.4.0'
 math.randomseed(os.time())
 local SCRIPT_DIR = debug.getinfo(1, 'S').source:match('^@(.*[\\/])') or './'
 local MOD_DIR = SCRIPT_DIR:gsub('[\\/]Scripts[\\/]$', '\\')
@@ -455,6 +455,9 @@ do
     addSanity = function(pp, d) pcall(function() local ps = pp.pc.PlayerState; ps.Sanity = math.max(0, math.min(100, (ps.Sanity or 100) + d)) end) end,
   })
 end
+every(0.25, function()
+  if state.map and not state.loading and #custom.items > 0 and checkWorld() then custom.tickPrompts() end
+end)
 every(TICK, function()
   if state.map and not state.loading and #custom.entities > 0 and checkWorld() then custom.tickEntities(TICK) end
   custom.tickTimers()
@@ -526,7 +529,7 @@ every(TICK, function()
   if now ~= c.capDef then
     pcall(function() if c.caption then c.caption:K2_DestroyActor() end end)
     c.caption, c.capDef = nil, now
-    if now then c.caption = custom.textActor(w, now.text or '', 22, '#ffffff') end
+    if now then c.caption = custom.textActor(w, now.text or '', 22, '#ffffff', math.max(220, 640 * math.tan(math.rad(fov / 2)))) end
   end
   if c.caption then
     local yaw, pitch = math.rad(rot.Yaw), math.rad(rot.Pitch)
@@ -571,10 +574,11 @@ popup = function(pc, text)
   local loc = pawn:K2_GetActorLocation()
   local rot = pc:GetControlRotation()
   local yaw = math.rad(rot.Yaw)
-  local a = custom.textActor(vec(loc.X + math.cos(yaw) * 220, loc.Y + math.sin(yaw) * 220, loc.Z + 40), text, 14, '#fff3c4')
+  local a = custom.textActor(vec(loc.X + math.cos(yaw) * 220, loc.Y + math.sin(yaw) * 220, loc.Z + 40), text, 14, '#fff3c4', 260)
   if not a then return end
   a:K2_SetActorRotation({ Pitch = 0, Yaw = rot.Yaw + 180, Roll = 0 }, false) -- face the player
-  popups[#popups + 1] = { a = a, t = state.now + 4 }
+  popups[#popups + 1] = { a = a, t = state.now + math.max(5, #text * 0.12) } -- long messages stay longer
+  log('message: ' .. text)
 end
 -- Entity Spawn Areas (host only): each group waits a random min..max seconds, then spawns its
 -- entity at a random spot inside one of its areas (respecting maxAlive), then rolls a new delay.
@@ -596,13 +600,15 @@ local function spawnerTick(dt)
           local l = areas[math.random(#areas)]
           local c, sz = W(l.pos), l.size or { 400, 400, 250 }
           local p = vec(c.X + (math.random() - 0.5) * sz[1], c.Y + (math.random() - 0.5) * sz[2], c.Z - sz[3] / 2 + 100)
-          local cls = findObj(classCache, G.entity)
-          local a = cls and spawn(cls, p)
+          local ca = state.map.customAssets and state.map.customAssets[G.entity]
+          local a
+          if ca and ca.kind == 'entity' then a = cfg.experimentalEntities and custom.spawnEntity(ca, p, math.random() * 360) or nil
+          else local cls = findObj(classCache, G.entity); a = cls and spawn(cls, p) end
           if a then
             pcall(function() a:K2_SetActorRotation({ Pitch = 0, Yaw = math.random() * 360, Roll = 0 }, false) end)
-            pcall(function() a:SpawnDefaultController() end) -- give it its AI brain
+            if not ca then pcall(function() a:SpawnDefaultController() end) end -- a game monster's AI brain
             S.alive[#S.alive + 1] = a; state.spawnedEntities[#state.spawnedEntities + 1] = a
-            log(('spawned %s in group "%s" (%d alive), next in %.0f s'):format(G.entity:match('([^./]+)_C$') or G.entity, g, #S.alive, S.next - state.clock))
+            log(('spawned %s in group "%s" (%d alive), next in %.0f s'):format(ca and ca.name or G.entity:match('([^./]+)_C$') or G.entity, g, #S.alive, S.next - state.clock))
           else log('could not spawn entity ' .. tostring(G.entity)) end
         end
       end
@@ -636,7 +642,7 @@ function logicTick()
     local ok, p = pcall(function() return pp.pawn:K2_GetActorLocation() end)
     if ok and p and p.Z > state.offset[3] - 20000 then
       local key = pp.pc:GetFullName()
-      local mine = me and pp.pc == me
+      local mine = me and me:GetFullName() == key -- wrappers are new objects each call; never compare them with ==
       if host and p.Z < killZ then
         local cp = state.checkpoints[key]
         if cp then teleport(pp, cp, { Pitch = 0, Yaw = 0, Roll = 0 }) else local l, r = spawnPoint(i - 1); teleport(pp, l, r) end
@@ -898,6 +904,7 @@ if readFile(MOD_DIR .. 'dev.enable') then
         elseif words[1] == 'entdbg' then -- entdbg move|anim|speed|vel on|off
           custom.dbg[words[2] or ''] = words[3] ~= 'off'; log('entdbg ' .. tostring(words[2]) .. '=' .. tostring(custom.dbg[words[2] or '']))
         elseif words[1] == 'msgtest' then ExecuteInGameThread(function() log('msgtest start'); local pc = localPC(); pcall(popup, pc, table.concat(words, ' ', 2) ~= '' and table.concat(words, ' ', 2) or 'Hello from ETBR'); log('msgtest done') end)
+        elseif words[1] == 'drop' then ExecuteInGameThread(function() log('dev drop: ' .. tostring(pcall(custom.dropHand))) end)
         elseif words[1] == 'pickup' then ExecuteInGameThread(function() log('dev pickup: ' .. tostring(select(2, pcall(custom.tryPickup)))) end)
         elseif words[1] == 'use' then ExecuteInGameThread(function() pcall(custom.useHand); log('dev use') end)
         elseif words[1] == 'ents' then ExecuteInGameThread(function()

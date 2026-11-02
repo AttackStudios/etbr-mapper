@@ -20,9 +20,9 @@ objs += [
   {'id': 'A', 'asset': 'cubeA0001', 'kind': 'custom', 'pos': [450, -150, 0], 'rot': [0, 25, 0], 'scale': [1, 1, 1]},
   {'id': 'B', 'asset': 'cubeB0001', 'kind': 'custom', 'pos': [450, 150, 0], 'rot': [0, 25, 0], 'scale': [1, 1, 1]},
   {'id': 'T', 'kind': 'text', 'asset': 'text', 'pos': [700, 0, 200], 'rot': [0, 180, 0], 'scale': [1, 1, 1], 'props': {'text': 'Welcome to ETBR Mapper', 'size': 40, 'color': '#fff3c4'}},
-  {'id': 'I1', 'asset': 'testlamp01', 'kind': 'custom', 'pos': [120, 0, 0], 'rot': [0, 0, 0], 'scale': [0.3, 0.3, 0.3]},
+  {'id': 'I1', 'asset': 'testlamp01', 'kind': 'custom', 'pos': [180, 0, 0], 'rot': [0, 0, 0], 'scale': [0.3, 0.3, 0.3]},
 ]
 m = {'format': 'etbrmap', 'version': 1, 'meta': {'name': 'WindingTest'}, 'settings': {'spawn': {'pos': [0, 0, 100], 'yaw': 0}, 'offset': [0, 0, 200000], 'killZ': -3000, 'lighting': 'realistic'},
-     'objects': objs, 'logic': [{'id': 'Z', 'type': 'message', 'pos': [0, 0, 100], 'size': [300, 300, 300], 'text': 'Message zone works'}],
+     'objects': objs, 'logic': [{'id': 'Z', 'type': 'message', 'pos': [0, 500, 100], 'size': [150, 150, 300], 'text': 'The message zone works and this sentence stays long enough to read it'}],
      'customAssets': {'cubeA0001': A, 'cubeB0001': B, 'testlamp01': item}}
 json.dump(m, open(sys.argv[2], 'w')); print('ok')

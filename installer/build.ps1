@@ -24,7 +24,7 @@ Copy-Item "$root\extractor\pub\Extractor.exe" "$stage\resources\extractor\Extrac
 New-Item -ItemType Directory -Force "$stage\mod" | Out-Null
 Copy-Item "$root\payload\UE4SS_*.zip" "$stage\mod"
 Copy-Item -Recurse "$root\loader\ETBRLoader" "$stage\mod\ETBRLoader"
-Remove-Item -Recurse -Force "$stage\mod\ETBRLoader\maps", "$stage\mod\ETBRLoader\dev.enable", "$stage\mod\ETBRLoader\cache" -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force "$stage\mod\ETBRLoader\maps", "$stage\mod\ETBRLoader\dev.enable", "$stage\mod\ETBRLoader\cache", "$stage\mod\ETBRLoader\io", "$stage\mod\ETBRLoader\live.json", "$stage\mod\ETBRLoader\devcmd.txt" -ErrorAction SilentlyContinue
 Copy-Item "$root\installer\install-mod.ps1" "$stage\mod"
 
 Remove-Item (Join-Path $dist 'payload.zip') -ErrorAction SilentlyContinue
