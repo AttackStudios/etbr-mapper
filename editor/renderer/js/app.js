@@ -736,7 +736,13 @@ class App {
     const live = await api.game.writeLive({ room: this.collab.room, server: this.settings.serverUrl, name: this.settings.name, color: this.settings.color });
     if (!live.ok) return this.modal('Can\'t test yet', `<p>${esc(live.error)}</p>`);
     const { running } = await api.game.launch();
+    // the two things that make a test look like "nothing spawned"
+    const warn = [];
+    if (!this.doc.map.objects.some((o) => o.kind !== 'mesh' && o.kind !== 'custom' && /Light/.test(o.asset || ''))) warn.push('<b>This level has no lights.</b> The game adds plain temporary lights so you can see, but place lights from the <b>Lights</b> tab for the real look.');
+    const { floorUnder } = await import('./nav.js');
+    if (!floorUnder(this.viewport, this.doc, this.doc.map.settings.spawn?.pos || [0, 0, 100])) warn.push('<b>Nothing to stand on under the spawn.</b> You would fall into the void. Move the spawn over a floor, or use a Floor piece: ceiling tiles only show from underneath.');
     this.modal('Test in game', `
+      ${warn.map((w) => `<p style="color:#ffb86b">${w}</p>`).join('')}
       <p>${running ? 'Escape the Backrooms is already running.' : 'Launching Escape the Backrooms through Steam…'}</p>
       <ol class="steps">
         <li>Start a game (any level — singleplayer or a co-op lobby you host).</li>

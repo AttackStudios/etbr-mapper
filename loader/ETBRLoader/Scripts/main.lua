@@ -17,7 +17,7 @@ local json = require('json')
 local cfg = require('config')
 local custom = require('custom')
 
-local VERSION = '1.4.0'
+local VERSION = '1.4.1'
 math.randomseed(os.time())
 local SCRIPT_DIR = debug.getinfo(1, 'S').source:match('^@(.*[\\/])') or './'
 local MOD_DIR = SCRIPT_DIR:gsub('[\\/]Scripts[\\/]$', '\\')
@@ -312,6 +312,7 @@ local function forgetWorld(reason)
   GS, KSL = nil, nil
   custom.forgetWorld()
   state.byId, state.spawnedEntities, state.spawners, state.fills = {}, {}, {}, {}
+  state.workLights, state.workKey = nil, nil -- their world is gone: drop without touching
   state.triggered, state.checkpoints, state.loading = {}, {}, false
   state.buildJob = nil
   popups = {}
@@ -615,6 +616,53 @@ local function spawnerTick(dt)
     end
   end
 end
+
+-- A level with no lights would be pitch black out here (the room is far from the real level, and the
+-- editor's view has its own soft light). Until the builder adds a light, hang shadowless work lights.
+local function levelHasLight(m)
+  for _, o in ipairs(m.objects or {}) do
+    if o.kind ~= 'mesh' and o.kind ~= 'custom' and tostring(o.asset or ''):find('Light') then return true end
+  end
+  return false
+end
+local function clearWorkLights()
+  for _, a in ipairs(state.workLights or {}) do pcall(function() a:K2_DestroyActor() end) end
+  state.workLights, state.workKey = nil, nil
+end
+local function workLightTick()
+  if not state.map then if state.workLights then clearWorkLights() end return end
+  if state.loading or not checkWorld() then return end
+  local m = state.map
+  if levelHasLight(m) then if state.workLights then clearWorkLights(); log('level has its own lights now: work lights removed') end return end
+  local sp = ((m.settings or {}).spawn or {}).pos or { 0, 0, 100 }
+  local x0, x1, y0, y1, z0 = sp[1], sp[1], sp[2], sp[2], sp[3] - 100
+  for _, o in ipairs(m.objects or {}) do
+    local p = o.pos or { 0, 0, 0 }
+    x0, x1, y0, y1, z0 = math.min(x0, p[1]), math.max(x1, p[1]), math.min(y0, p[2]), math.max(y1, p[2]), math.min(z0, p[3])
+  end
+  local key = ('%d,%d,%d,%d,%d'):format(x0 // 800, x1 // 800, y0 // 800, y1 // 800, z0 // 200)
+  if state.workKey == key then return end
+  clearWorkLights(); state.workKey, state.workLights = key, {}
+  local cls = findObj(classCache, '/Script/Engine.PointLight')
+  if not cls then return end
+  local nx = math.min(4, math.floor((x1 - x0) / 900) + 1)
+  local ny = math.min(4, math.floor((y1 - y0) / 900) + 1)
+  local stepX, stepY = (x1 - x0) / nx, (y1 - y0) / ny
+  for i = 0, nx - 1 do for j = 0, ny - 1 do
+    local a = spawn(cls, W({ x0 + (i + 0.5) * stepX, y0 + (j + 0.5) * stepY, z0 + 280 }))
+    if a then
+      pcall(function()
+        local lc = a.LightComponent
+        lc:SetMobility(2); lc:SetCastShadows(false); lc:SetIntensity(5000)
+        lc:SetAttenuationRadius(math.max(1400, math.max(stepX, stepY) * 1.6))
+        lc:SetLightColor({ R = 1, G = 0.95, B = 0.8, A = 1 }, true)
+      end)
+      state.workLights[#state.workLights + 1] = a
+    end
+  end end
+  log(('this level has no lights: added %d temporary work lights (place a light in the editor to replace them)'):format(#state.workLights))
+end
+every(1, function() pcall(workLightTick) end)
 
 function logicTick()
   -- live pose sample (read on the game thread, sent from the async loop)

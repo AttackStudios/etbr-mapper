@@ -8,6 +8,21 @@ const HEAD = 170;         // cm of clear space an entity needs above the floor
 const BODY = 30;          // cm wall clearance probe
 const MAX_CELLS = 90000;  // ~150 x 150 m at 50 cm
 
+// is there anything to stand on under this Unreal-cm position? Same front-faces-only rule the game
+// draws with, so a ceiling tile laid flat (visible only from below) counts as nothing.
+export function floorUnder(viewport, doc, pos) {
+  const solid = [];
+  for (const [id, root] of viewport.objects) {
+    if (root.userData.c === 'logic' || root.userData.c === 'spawn') continue;
+    const it = doc.get('objects', id);
+    if (!it || it.props?.noCollision || it.kind === 'text') continue;
+    root.updateMatrixWorld(true);
+    root.traverse((o) => { if (o.isMesh && !o.userData.isLabel && !o.userData.placeholder) solid.push(o); });
+  }
+  const rc = new THREE.Raycaster(new THREE.Vector3(pos[0] / 100, pos[2] / 100 + 0.5, pos[1] / 100), new THREE.Vector3(0, -1, 0));
+  return rc.intersectObjects(solid, false).length > 0;
+}
+
 export function bakeNav(viewport, doc) {
   const solid = [];
   for (const [id, root] of viewport.objects) {
